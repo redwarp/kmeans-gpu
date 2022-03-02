@@ -1,0 +1,13 @@
+[package]
+name = "kmeans-gpu"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[dependencies]
+image = "0.24"
+wgpu = "0.12"
+bytemuck = { version = "1.7", features = ["derive"] }
+anyhow = "1.0"
+pollster = "0.2"
+rand = "0.8"
