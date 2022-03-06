@@ -193,11 +193,7 @@ fn main() -> Result<()> {
         compute_pass.set_pipeline(&find_centroid_pipeline);
         compute_pass.set_bind_group(0, &find_centroid_bind_group, &[]);
         compute_pass.dispatch(dispatch_with, dispatch_height, 1);
-    }
-    {
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Swap pass"),
-        });
+
         compute_pass.set_pipeline(&swap_pipeline);
         compute_pass.set_bind_group(0, &swap_bind_group, &[]);
         compute_pass.dispatch(dispatch_with, dispatch_height, 1);
