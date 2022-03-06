@@ -31,6 +31,7 @@ fn main(
 
     var min_distance: u32 = max_int;
     var found: u32 = 0u;
+    var found_index: u32 = 0u;
 
     for(var index: u32 = 0u; index < centroids.count; index = index + 1u){
       let centroid: u32 = centroids.data[index];
@@ -44,6 +45,7 @@ fn main(
       let smaller = bool(distance < min_distance);
       min_distance = distance * u32(smaller) + min_distance * u32(!smaller);
       found = centroid * u32(smaller) + found * u32(!smaller);
+      found_index = index * u32(smaller) + found_index * u32(!smaller);
     }
 
     calculated.data[global_id.x] = found;

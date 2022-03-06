@@ -14,6 +14,13 @@ fn main() -> Result<()> {
 
     let (width, height) = image.dimensions();
 
+    let k = 7;
+
+    let pixels = pixels(&image);
+    let centroids = init_centroids(&image, k);
+
+    println!("Setting up compute");
+
     let instance = wgpu::Instance::new(wgpu::Backends::all());
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptionsBase {
@@ -26,11 +33,6 @@ fn main() -> Result<()> {
     let (device, queue) = adapter
         .request_device(&Default::default(), None)
         .block_on()?;
-
-    let k = 7;
-
-    let pixels = pixels(&image);
-    let centroids = init_centroids(&image, k);
 
     let pixel_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: None,
@@ -79,7 +81,7 @@ fn main() -> Result<()> {
         device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("Find centroid pipeline"),
             layout: None,
-            module: &&choose_centroid_shader,
+            module: &choose_centroid_shader,
             entry_point: "main",
         });
 
@@ -121,24 +123,64 @@ fn main() -> Result<()> {
         ],
     });
 
+    let swap_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+        label: Some("Swap colors shader"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("shaders/swap.wgsl").into()),
+    });
+
+    let swap_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("Swap pipeline"),
+        layout: None,
+        module: &swap_shader,
+        entry_point: "main",
+    });
+
+    let swap_bind_group = device.create_bind_group(&BindGroupDescriptor {
+        label: None,
+        layout: &swap_pipeline.get_bind_group_layout(0),
+        entries: &[
+            BindGroupEntry {
+                binding: 0,
+                resource: centroid_buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: calculated_buffer.as_entire_binding(),
+            },
+        ],
+    });
+
     let mut encoder =
         device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
+    let find_centroid_dispatch_with = compute_work_group_count(pixels[0], 256);
     {
         let find_centroid_dispatch_with = compute_work_group_count(pixels[0], 256);
         let choose_centroid_dispatch_with = compute_work_group_count(k, 16);
         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Kmean pass"),
         });
-        for _ in 0..1 {
-            compute_pass.set_pipeline(&find_centroid_pipeline);
-            compute_pass.set_bind_group(0, &find_centroid_bind_group, &[]);
-            compute_pass.dispatch(find_centroid_dispatch_with, 1, 1);
+        // for _ in 0..1 {
+        compute_pass.set_pipeline(&find_centroid_pipeline);
+        compute_pass.set_bind_group(0, &find_centroid_bind_group, &[]);
+        compute_pass.dispatch(find_centroid_dispatch_with, 1, 1);
 
-            compute_pass.set_pipeline(&choose_centroid_pipeline);
-            compute_pass.set_bind_group(0, &choose_centroid_bind_group, &[]);
-            compute_pass.dispatch(choose_centroid_dispatch_with, 1, 1);
-        }
+        // compute_pass.set_pipeline(&choose_centroid_pipeline);
+        // compute_pass.set_bind_group(0, &choose_centroid_bind_group, &[]);
+        // compute_pass.dispatch(choose_centroid_dispatch_with, 1, 1);
+        // }
+
+        // compute_pass.set_pipeline(&swap_pipeline);
+        // compute_pass.set_bind_group(0, &swap_bind_group, &[]);
+        // compute_pass.dispatch(find_centroid_dispatch_with, 1, 1);
+    }
+    {
+        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("Swap pass"),
+        });
+        compute_pass.set_pipeline(&swap_pipeline);
+        compute_pass.set_bind_group(0, &swap_bind_group, &[]);
+        compute_pass.dispatch(find_centroid_dispatch_with, 1, 1);
     }
 
     encoder.copy_buffer_to_buffer(&calculated_buffer, 0, &staging_buffer, 0, size);
@@ -151,6 +193,7 @@ fn main() -> Result<()> {
     device.poll(wgpu::Maintain::Wait);
 
     if let Ok(()) = buffer_future.block_on() {
+        println!("We mapped the data back");
         let data = buffer_slice.get_mapped_range();
         let result: Vec<u32> = bytemuck::cast_slice(&data).to_vec();
         let out_pixels: Vec<u8> = result
