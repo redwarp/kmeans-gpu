@@ -5,12 +5,13 @@ use image::{ImageBuffer, Rgba};
 use pollster::FutureExt;
 use rand::Rng;
 use wgpu::{
-    util::DeviceExt, BindGroupDescriptor, BindGroupEntry, BindingResource, BufferAddress,
-    BufferDescriptor, BufferUsages, TextureViewDescriptor,
+    util::{BufferInitDescriptor, DeviceExt},
+    BindGroupDescriptor, BindGroupEntry, BindingResource, BufferAddress, BufferDescriptor,
+    BufferUsages, TextureViewDescriptor,
 };
 
 fn main() -> Result<()> {
-    let image = image::load_from_memory(include_bytes!("landscape.jpg"))?.to_rgba8();
+    let image = image::load_from_memory(include_bytes!("white.png"))?.to_rgba8();
 
     let (width, height) = image.dimensions();
 
@@ -115,37 +116,67 @@ fn main() -> Result<()> {
         ],
     });
 
-    // let choose_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
-    //     label: Some("Find centroid shader"),
-    //     source: wgpu::ShaderSource::Wgsl(include_str!("shaders/choose_centroid.wgsl").into()),
-    // });
+    let choose_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+        label: Some("Find centroid shader"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("shaders/choose_centroid.wgsl").into()),
+    });
 
-    // let choose_centroid_pipeline =
-    //     device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-    //         label: Some("Find centroid pipeline"),
-    //         layout: None,
-    //         module: &choose_centroid_shader,
-    //         entry_point: "main",
-    //     });
+    let choose_centroid_pipeline =
+        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Find centroid pipeline"),
+            layout: None,
+            module: &choose_centroid_shader,
+            entry_point: "main",
+        });
 
-    // let choose_centroid_bind_group = device.create_bind_group(&BindGroupDescriptor {
-    //     label: None,
-    //     layout: &choose_centroid_pipeline.get_bind_group_layout(0),
-    //     entries: &[
-    //         BindGroupEntry {
-    //             binding: 0,
-    //             resource: centroid_buffer.as_entire_binding(),
-    //         },
-    //         BindGroupEntry {
-    //             binding: 1,
-    //             resource: pixel_buffer.as_entire_binding(),
-    //         },
-    //         BindGroupEntry {
-    //             binding: 2,
-    //             resource: calculated_buffer.as_entire_binding(),
-    //         },
-    //     ],
-    // });
+    let choose_centroid_bind_group_0 = device.create_bind_group(&BindGroupDescriptor {
+        label: None,
+        layout: &choose_centroid_pipeline.get_bind_group_layout(0),
+        entries: &[
+            BindGroupEntry {
+                binding: 0,
+                resource: centroid_buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: calculated_buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 2,
+                resource: BindingResource::TextureView(
+                    &input_texture.create_view(&TextureViewDescriptor::default()),
+                ),
+            },
+        ],
+    });
+
+    let color_buffer_size = size / (256 * 8) * 2 * 16;
+    let color_buffer = device.create_buffer(&BufferDescriptor {
+        label: None,
+        size: color_buffer_size as BufferAddress,
+        usage: BufferUsages::STORAGE,
+        mapped_at_creation: false,
+    });
+    let state_buffer_size = size / (256 * 8);
+    let state_buffer = device.create_buffer_init(&BufferInitDescriptor {
+        label: None,
+        contents: bytemuck::cast_slice::<u32, u8>(&vec![0; state_buffer_size]),
+        usage: BufferUsages::STORAGE,
+    });
+    let choose_centroid_bind_group_1 = device.create_bind_group(&BindGroupDescriptor {
+        label: None,
+        layout: &choose_centroid_pipeline.get_bind_group_layout(1),
+        entries: &[
+            BindGroupEntry {
+                binding: 0,
+                resource: color_buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: state_buffer.as_entire_binding(),
+            },
+        ],
+    });
 
     let swap_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
         label: Some("Swap colors shader"),
@@ -193,6 +224,11 @@ fn main() -> Result<()> {
         compute_pass.set_bind_group(0, &find_centroid_bind_group, &[]);
         compute_pass.dispatch(dispatch_with, dispatch_height, 1);
 
+        compute_pass.set_pipeline(&choose_centroid_pipeline);
+        compute_pass.set_bind_group(0, &choose_centroid_bind_group_0, &[]);
+        compute_pass.set_bind_group(1, &choose_centroid_bind_group_1, &[]);
+        compute_pass.dispatch((size / (256 * 8)) as u32, 1, 1);
+
         compute_pass.set_pipeline(&swap_pipeline);
         compute_pass.set_bind_group(0, &swap_bind_group, &[]);
         compute_pass.dispatch(dispatch_with, dispatch_height, 1);
@@ -206,6 +242,14 @@ fn main() -> Result<()> {
     let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
         size: output_buffer_size,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let centroid_size = centroids.len() as BufferAddress;
+    let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: centroid_size,
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
@@ -228,31 +272,49 @@ fn main() -> Result<()> {
         texture_size,
     );
 
+    encoder.copy_buffer_to_buffer(&centroid_buffer, 0, &staging_buffer, 0, centroid_size);
+
     queue.submit(Some(encoder.finish()));
 
     let buffer_slice = output_buffer.slice(..);
     let buffer_future = buffer_slice.map_async(wgpu::MapMode::Read);
 
+    // Note that we're not calling `.await` here.
+    let cent_buffer_slice = staging_buffer.slice(..);
+    // Gets the future representing when `staging_buffer` can be read from
+    let cent_buffer_future = cent_buffer_slice.map_async(wgpu::MapMode::Read);
+
     device.poll(wgpu::Maintain::Wait);
 
-    if let Ok(()) = buffer_future.block_on() {
-        println!("We mapped the data back");
-        let padded_data = buffer_slice.get_mapped_range();
+    if let Ok(()) = cent_buffer_future.block_on() {
+        let data = cent_buffer_slice.get_mapped_range();
 
-        let mut pixels: Vec<u8> = vec![0; unpadded_bytes_per_row * height as usize];
-        for (padded, pixels) in padded_data
-            .chunks_exact(padded_bytes_per_row)
-            .zip(pixels.chunks_exact_mut(unpadded_bytes_per_row))
+        for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[4..])
+            .chunks(4)
+            .enumerate()
         {
-            pixels.copy_from_slice(&padded[..unpadded_bytes_per_row]);
-        }
-
-        if let Some(output_image) =
-            image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(width, height, &pixels[..])
-        {
-            output_image.save("kmean.png")?;
+            println!("Centroid {index} = {k:?}")
         }
     }
+
+    // if let Ok(()) = buffer_future.block_on() {
+    //     println!("We mapped the data back");
+    //     let padded_data = buffer_slice.get_mapped_range();
+
+    //     let mut pixels: Vec<u8> = vec![0; unpadded_bytes_per_row * height as usize];
+    //     for (padded, pixels) in padded_data
+    //         .chunks_exact(padded_bytes_per_row)
+    //         .zip(pixels.chunks_exact_mut(unpadded_bytes_per_row))
+    //     {
+    //         pixels.copy_from_slice(&padded[..unpadded_bytes_per_row]);
+    //     }
+
+    //     if let Some(output_image) =
+    //         image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(width, height, &pixels[..])
+    //     {
+    //         output_image.save("kmean.png")?;
+    //     }
+    // }
 
     Ok(())
 }

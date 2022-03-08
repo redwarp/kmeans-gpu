@@ -19,7 +19,7 @@ struct StateBuffer {
 [[group(0), binding(1)]] var<storage, read> calculated: Indices;
 [[group(0), binding(2)]] var pixels: texture_2d<f32>;
 [[group(1), binding(0)]] var<storage, read_write> prefix_buffer: ColorBuffer;
-[[group(1), binding(3)]] var<storage, read_write> flag_buffer: StateBuffer;
+[[group(1), binding(1)]] var<storage, read_write> flag_buffer: StateBuffer;
 
 
 let workgroup_size: u32 = 256u;
@@ -41,6 +41,12 @@ fn last_group_idx() -> u32 {
     return arrayLength(&flag_buffer.state) - 1u;
 }
 
+fn in_bounds(global_x: u32, dimensions: vec2<i32>) -> bool {
+    let x = global_x % u32(dimensions.x);
+    let y = global_x / u32(dimensions.x);
+    return x < u32(dimensions.x) && y < u32(dimensions.y);
+}
+
 [[stage(compute), workgroup_size(256)]]
 fn main(
     [[builtin(local_invocation_id)]] local_id : vec3<u32>,
@@ -49,10 +55,12 @@ fn main(
 ) {
     let dimensions = textureDimensions(pixels);
     let global_x = global_id.x;
-    var local: vec4<f32> = textureLoad(pixels, coords(global_x, dimensions), 0);
+    let in_bounds = f32(in_bounds(global_x, dimensions));
+    var local: vec4<f32> = textureLoad(pixels, coords(global_x * N_SEQ, dimensions), 0) * in_bounds;
+    let xyz = calculated.data[0];
 
     for (var i: u32 = 1u; i < N_SEQ; i = i + 1u) {
-        local = local + textureLoad(pixels, coords(global_x * N_SEQ + i, dimensions), 0);
+        local = local + textureLoad(pixels, coords(global_x * N_SEQ + i, dimensions), 0) * in_bounds;
     }
     scratch[local_id.x] = local;
     
@@ -64,7 +72,6 @@ fn main(
         workgroupBarrier();
         scratch[local_id.x] = local;
     }
-    
     
     var exclusive_prefix = vec4<f32>(0.0);
     var flag = FLAG_AGGREGATE_READY;
@@ -130,13 +137,14 @@ fn main(
 
     var old = vec4<f32>(0.0);
     if (local_id.x > 0u) {
-        old = scratch[local_id.x - 1u];
+        old = scratch[local_id.x ];
     }
 
     if (workgroup_id.x == last_group_idx() & local_id.x == workgroup_size - 1u) {
-        let sum = prefix + old + local;
+        let sum = prefix + scratch[local_id.x];
         centroids.data[0] = sum.r;
         centroids.data[1] = sum.g;
         centroids.data[2] = sum.b;
+        centroids.data[3] = sum.a;
     }
 }
