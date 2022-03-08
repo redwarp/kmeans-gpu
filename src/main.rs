@@ -10,7 +10,7 @@ use wgpu::{
 };
 
 fn main() -> Result<()> {
-    let image = image::load_from_memory(include_bytes!("landscape_small.jpg"))?.to_rgba8();
+    let image = image::load_from_memory(include_bytes!("landscape.jpg"))?.to_rgba8();
 
     let (width, height) = image.dimensions();
 
@@ -75,12 +75,11 @@ fn main() -> Result<()> {
         usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
     });
 
-    let size = (size_of::<u32>() * width as usize * height as usize) as BufferAddress;
-    let calculated_buffer = device.create_buffer(&BufferDescriptor {
+    let size = next_multiple_of(256 * 8, width * height) as usize;
+    let calculated_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: None,
-        size,
+        contents: bytemuck::cast_slice::<u32, u8>(&vec![0; size]),
         usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
     });
 
     let find_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
@@ -94,19 +93,6 @@ fn main() -> Result<()> {
         module: &find_centroid_shader,
         entry_point: "main",
     });
-
-    // let choose_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
-    //     label: Some("Find centroid shader"),
-    //     source: wgpu::ShaderSource::Wgsl(include_str!("shaders/choose_centroid.wgsl").into()),
-    // });
-
-    // let choose_centroid_pipeline =
-    //     device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-    //         label: Some("Find centroid pipeline"),
-    //         layout: None,
-    //         module: &choose_centroid_shader,
-    //         entry_point: "main",
-    //     });
 
     let find_centroid_bind_group = device.create_bind_group(&BindGroupDescriptor {
         label: None,
@@ -128,6 +114,19 @@ fn main() -> Result<()> {
             },
         ],
     });
+
+    // let choose_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+    //     label: Some("Find centroid shader"),
+    //     source: wgpu::ShaderSource::Wgsl(include_str!("shaders/choose_centroid.wgsl").into()),
+    // });
+
+    // let choose_centroid_pipeline =
+    //     device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+    //         label: Some("Find centroid pipeline"),
+    //         layout: None,
+    //         module: &choose_centroid_shader,
+    //         entry_point: "main",
+    //     });
 
     // let choose_centroid_bind_group = device.create_bind_group(&BindGroupDescriptor {
     //     label: None,
@@ -297,4 +296,9 @@ fn padded_bytes_per_row(width: u32) -> usize {
     let bytes_per_row = width as usize * 4;
     let padding = (256 - bytes_per_row % 256) % 256;
     bytes_per_row + padding
+}
+
+fn next_multiple_of(multiple: u32, value: u32) -> u32 {
+    let padding = (multiple - value % multiple) % multiple;
+    value + padding
 }
