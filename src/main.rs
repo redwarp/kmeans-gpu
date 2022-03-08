@@ -1,9 +1,12 @@
-use std::{mem::size_of, vec};
-
 use anyhow::Result;
 use image::{ImageBuffer, Rgba};
 use pollster::FutureExt;
+use rand::rngs::StdRng;
 use rand::Rng;
+use rand::SeedableRng;
+use std::vec;
+use wgpu::Buffer;
+use wgpu::BufferBinding;
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
     BindGroupDescriptor, BindGroupEntry, BindingResource, BufferAddress, BufferDescriptor,
@@ -11,11 +14,11 @@ use wgpu::{
 };
 
 fn main() -> Result<()> {
-    let image = image::load_from_memory(include_bytes!("white.png"))?.to_rgba8();
+    let image = image::load_from_memory(include_bytes!("landscape_small.jpg"))?.to_rgba8();
 
     let (width, height) = image.dimensions();
 
-    let k = 7;
+    let k = 8;
 
     let centroids = init_centroids(&image, k);
 
@@ -46,7 +49,7 @@ fn main() -> Result<()> {
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
+        format: wgpu::TextureFormat::Rgba8Uint,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
     });
     queue.write_texture(
@@ -66,7 +69,7 @@ fn main() -> Result<()> {
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
+        format: wgpu::TextureFormat::Rgba8Uint,
         usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::STORAGE_BINDING,
     });
 
@@ -79,7 +82,7 @@ fn main() -> Result<()> {
     let size = next_multiple_of(256 * 8, width * height) as usize;
     let calculated_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: None,
-        contents: bytemuck::cast_slice::<u32, u8>(&vec![0; size]),
+        contents: bytemuck::cast_slice::<u32, u8>(&vec![k + 1; size]),
         usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
     });
 
@@ -150,7 +153,7 @@ fn main() -> Result<()> {
         ],
     });
 
-    let color_buffer_size = size / (256 * 8) * 2 * 16;
+    let color_buffer_size = size / (256 * 8) * 8 * 4;
     let color_buffer = device.create_buffer(&BufferDescriptor {
         label: None,
         size: color_buffer_size as BufferAddress,
@@ -177,6 +180,38 @@ fn main() -> Result<()> {
             },
         ],
     });
+
+    let settings_buffer: Vec<Buffer> = (0..k)
+        .map(|k| {
+            device.create_buffer_init(&BufferInitDescriptor {
+                label: None,
+                contents: bytemuck::cast_slice(&[k]),
+                usage: BufferUsages::UNIFORM,
+            })
+        })
+        .collect();
+    // let settings_buffer = device.create_buffer_init(&BufferInitDescriptor {
+    //     label: None,
+    //     contents: bytemuck::cast_slice(&(0..k).collect::<Vec<_>>()),
+    //     usage: BufferUsages::STORAGE,
+    // });
+
+    let settings_bind_groups: Vec<_> = (0..k)
+        .map(|k| {
+            device.create_bind_group(&BindGroupDescriptor {
+                label: None,
+                layout: &choose_centroid_pipeline.get_bind_group_layout(2),
+                entries: &[BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::Buffer(BufferBinding {
+                        buffer: &settings_buffer[k as usize],
+                        offset: 0,
+                        size: None,
+                    }),
+                }],
+            })
+        })
+        .collect();
 
     let swap_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
         label: Some("Swap colors shader"),
@@ -224,10 +259,19 @@ fn main() -> Result<()> {
         compute_pass.set_bind_group(0, &find_centroid_bind_group, &[]);
         compute_pass.dispatch(dispatch_with, dispatch_height, 1);
 
-        compute_pass.set_pipeline(&choose_centroid_pipeline);
-        compute_pass.set_bind_group(0, &choose_centroid_bind_group_0, &[]);
-        compute_pass.set_bind_group(1, &choose_centroid_bind_group_1, &[]);
-        compute_pass.dispatch((size / (256 * 8)) as u32, 1, 1);
+        for _ in 0..30 {
+            compute_pass.set_pipeline(&choose_centroid_pipeline);
+            compute_pass.set_bind_group(0, &choose_centroid_bind_group_0, &[]);
+            compute_pass.set_bind_group(1, &choose_centroid_bind_group_1, &[]);
+            for i in 0..k {
+                compute_pass.set_bind_group(2, &settings_bind_groups[i as usize], &[]);
+                compute_pass.dispatch((size / (256 * 8)) as u32, 1, 1);
+            }
+
+            compute_pass.set_pipeline(&find_centroid_pipeline);
+            compute_pass.set_bind_group(0, &find_centroid_bind_group, &[]);
+            compute_pass.dispatch(dispatch_with, dispatch_height, 1);
+        }
 
         compute_pass.set_pipeline(&swap_pipeline);
         compute_pass.set_bind_group(0, &swap_bind_group, &[]);
@@ -289,7 +333,7 @@ fn main() -> Result<()> {
     if let Ok(()) = cent_buffer_future.block_on() {
         let data = cent_buffer_slice.get_mapped_range();
 
-        for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[4..])
+        for (index, k) in bytemuck::cast_slice::<u8, u32>(&data[4..])
             .chunks(4)
             .enumerate()
         {
@@ -297,24 +341,24 @@ fn main() -> Result<()> {
         }
     }
 
-    // if let Ok(()) = buffer_future.block_on() {
-    //     println!("We mapped the data back");
-    //     let padded_data = buffer_slice.get_mapped_range();
+    if let Ok(()) = buffer_future.block_on() {
+        println!("We mapped the data back");
+        let padded_data = buffer_slice.get_mapped_range();
 
-    //     let mut pixels: Vec<u8> = vec![0; unpadded_bytes_per_row * height as usize];
-    //     for (padded, pixels) in padded_data
-    //         .chunks_exact(padded_bytes_per_row)
-    //         .zip(pixels.chunks_exact_mut(unpadded_bytes_per_row))
-    //     {
-    //         pixels.copy_from_slice(&padded[..unpadded_bytes_per_row]);
-    //     }
+        let mut pixels: Vec<u8> = vec![0; unpadded_bytes_per_row * height as usize];
+        for (padded, pixels) in padded_data
+            .chunks_exact(padded_bytes_per_row)
+            .zip(pixels.chunks_exact_mut(unpadded_bytes_per_row))
+        {
+            pixels.copy_from_slice(&padded[..unpadded_bytes_per_row]);
+        }
 
-    //     if let Some(output_image) =
-    //         image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(width, height, &pixels[..])
-    //     {
-    //         output_image.save("kmean.png")?;
-    //     }
-    // }
+        if let Some(output_image) =
+            image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(width, height, &pixels[..])
+        {
+            output_image.save("kmean.png")?;
+        }
+    }
 
     Ok(())
 }
@@ -323,7 +367,7 @@ fn init_centroids(image: &ImageBuffer<Rgba<u8>, Vec<u8>>, k: u32) -> Vec<u8> {
     let mut centroids: Vec<u8> = vec![];
     centroids.extend_from_slice(bytemuck::cast_slice(&[k]));
 
-    let mut rng = rand::thread_rng();
+    let mut rng = StdRng::seed_from_u64(42);
 
     let (width, height) = image.dimensions();
     let total_px = width * height;
@@ -333,10 +377,10 @@ fn init_centroids(image: &ImageBuffer<Rgba<u8>, Vec<u8>>, k: u32) -> Vec<u8> {
         let y = color_index / width;
         let Rgba(pixel) = image.get_pixel(x, y);
         centroids.extend_from_slice(bytemuck::cast_slice(&[
-            pixel[0] as f32 / 255.0,
-            pixel[1] as f32 / 255.0,
-            pixel[2] as f32 / 255.0,
-            pixel[3] as f32 / 255.0,
+            pixel[0] as u32,
+            pixel[1] as u32,
+            pixel[2] as u32,
+            pixel[3] as u32,
         ]));
     }
 
