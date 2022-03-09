@@ -7,12 +7,8 @@ struct Indices {
     data: array<u32>;
 };
 
-struct ColorBuffer {
+struct AtomicBuffer {
     data: array<atomic<u32>>;
-};
-
-struct StateBuffer {
-    state: array<atomic<u32>>;
 };
 
 struct Settings {
@@ -22,8 +18,9 @@ struct Settings {
 [[group(0), binding(0)]] var<storage, read_write> centroids: Centroids;
 [[group(0), binding(1)]] var<storage, read> calculated: Indices;
 [[group(0), binding(2)]] var pixels: texture_2d<f32>;
-[[group(1), binding(0)]] var<storage, read_write> prefix_buffer: ColorBuffer;
-[[group(1), binding(1)]] var<storage, read_write> flag_buffer: StateBuffer;
+[[group(1), binding(0)]] var<storage, read_write> prefix_buffer: AtomicBuffer;
+[[group(1), binding(1)]] var<storage, read_write> flag_buffer: AtomicBuffer;
+[[group(1), binding(2)]] var<storage, read_write> convergence: AtomicBuffer;
 [[group(2), binding(0)]] var<uniform> settings: Settings;
 
 
@@ -43,7 +40,7 @@ fn coords(global_x: u32, dimensions: vec2<i32>) -> vec2<i32> {
 }
 
 fn last_group_idx() -> u32 {
-    return arrayLength(&flag_buffer.state) - 1u;
+    return arrayLength(&flag_buffer.data) - 1u;
 }
 
 fn in_bounds(global_x: u32, dimensions: vec2<i32>) -> bool {
@@ -77,14 +74,19 @@ fn main(
     [[builtin(workgroup_id)]] workgroup_id : vec3<u32>,
     [[builtin(global_invocation_id)]] global_id : vec3<u32>,
 ) {
+    let k = settings.k;
+
+    if (atomicLoad(&convergence.data[centroids.count]) >= centroids.count) {
+        return;
+    }
+
     let dimensions = textureDimensions(pixels);
     let xyz = calculated.data[0];
     let global_x = global_id.x;
    
-    let k = settings.k;
     scratch[local_id.x] = vec4<f32>(0.0);
     if (local_id.x == workgroup_size - 1u) {
-        atomicStore(&flag_buffer.state[workgroup_id.x], FLAG_NOT_READY);
+        atomicStore(&flag_buffer.data[workgroup_id.x], FLAG_NOT_READY);
     }
     storageBarrier();
 
@@ -121,7 +123,7 @@ fn main(
 
     storageBarrier();
     if (local_id.x == workgroup_size - 1u) {
-        atomicStore(&flag_buffer.state[workgroup_id.x], flag);
+        atomicStore(&flag_buffer.data[workgroup_id.x], flag);
     }
 
     if(workgroup_id.x != 0u) {
@@ -129,7 +131,7 @@ fn main(
         var loop_back_ix = workgroup_id.x - 1u;
         loop {
             if(local_id.x == workgroup_size - 1u) {
-                shared_flag = atomicLoad(&flag_buffer.state[loop_back_ix]);
+                shared_flag = atomicLoad(&flag_buffer.data[loop_back_ix]);
             }
             workgroupBarrier();
             flag = shared_flag;
@@ -161,7 +163,7 @@ fn main(
         }
         storageBarrier();
         if (local_id.x == workgroup_size - 1u) {
-            atomicStore(&flag_buffer.state[workgroup_id.x], FLAG_PREFIX_READY);
+            atomicStore(&flag_buffer.data[workgroup_id.x], FLAG_PREFIX_READY);
         }
     }
 
@@ -174,10 +176,33 @@ fn main(
     if (workgroup_id.x == last_group_idx() & local_id.x == workgroup_size - 1u) {
         let sum = prefix + scratch[local_id.x];
         if(sum.a > 0.0) {
-            centroids.data[k * 4u + 0u] = sum.r / sum.a;
-            centroids.data[k * 4u + 1u] = sum.g / sum.a;
-            centroids.data[k * 4u + 2u] = sum.b / sum.a;
-            centroids.data[k * 4u + 3u] = 1.0;
+            let new_centroid = vec4<f32>(
+                sum.r / sum.a,
+                sum.g / sum.a,
+                sum.b / sum.a,
+                1.0
+            );
+            let previous_centroid = vec4<f32>(
+                centroids.data[k * 4u + 0u],
+                centroids.data[k * 4u + 1u],
+                centroids.data[k * 4u + 2u],
+                centroids.data[k * 4u + 3u],
+            );
+
+            centroids.data[k * 4u + 0u] = new_centroid.r;
+            centroids.data[k * 4u + 1u] = new_centroid.g;
+            centroids.data[k * 4u + 2u] = new_centroid.b;
+            centroids.data[k * 4u + 3u] = new_centroid.a;
+
+            atomicStore(&convergence.data[k], u32(distance(new_centroid, previous_centroid) < 0.01));
+        }
+
+        if (k == centroids.count - 1u) {
+            var converge = 0u;
+            for (var i = 0u; i < centroids.count; i = i + 1u) {
+                converge = converge + atomicLoad(&convergence.data[i]);
+            }
+            atomicStore(&convergence.data[centroids.count], converge);
         }
     }
     storageBarrier();

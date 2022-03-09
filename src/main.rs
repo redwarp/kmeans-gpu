@@ -14,7 +14,7 @@ fn main() -> Result<()> {
 
     let (width, height) = image.dimensions();
 
-    let k = 16;
+    let k = 8;
 
     let centroids = init_centroids(&image, k);
 
@@ -186,6 +186,12 @@ fn main() -> Result<()> {
         contents: bytemuck::cast_slice::<u32, u8>(&vec![0; state_buffer_size]),
         usage: BufferUsages::STORAGE,
     });
+    let convergence_buffer = device.create_buffer_init(&BufferInitDescriptor {
+        label: None,
+        contents: bytemuck::cast_slice::<u32, u8>(&vec![0; k as usize + 1]),
+        usage: BufferUsages::STORAGE,
+    });
+
     let choose_centroid_bind_group_1 = device.create_bind_group(&BindGroupDescriptor {
         label: None,
         layout: &choose_centroid_pipeline.get_bind_group_layout(1),
@@ -197,6 +203,10 @@ fn main() -> Result<()> {
             BindGroupEntry {
                 binding: 1,
                 resource: state_buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 2,
+                resource: convergence_buffer.as_entire_binding(),
             },
         ],
     });
@@ -210,11 +220,6 @@ fn main() -> Result<()> {
             })
         })
         .collect();
-    // let settings_buffer = device.create_buffer_init(&BufferInitDescriptor {
-    //     label: None,
-    //     contents: bytemuck::cast_slice(&(0..k).collect::<Vec<_>>()),
-    //     usage: BufferUsages::STORAGE,
-    // });
 
     let settings_bind_groups: Vec<_> = (0..k)
         .map(|k| {
