@@ -5,20 +5,21 @@ use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
 use std::vec;
+use wgpu::util::BufferInitDescriptor;
 use wgpu::Buffer;
 use wgpu::BufferBinding;
+use wgpu::Features;
 use wgpu::{
-    util::{BufferInitDescriptor, DeviceExt},
-    BindGroupDescriptor, BindGroupEntry, BindingResource, BufferAddress, BufferDescriptor,
-    BufferUsages, TextureViewDescriptor,
+    util::DeviceExt, BindGroupDescriptor, BindGroupEntry, BindingResource, BufferAddress,
+    BufferDescriptor, BufferUsages, TextureViewDescriptor,
 };
 
 fn main() -> Result<()> {
-    let image = image::load_from_memory(include_bytes!("landscape_small.jpg"))?.to_rgba8();
+    let image = image::load_from_memory(include_bytes!("landscape.jpg"))?.to_rgba8();
 
     let (width, height) = image.dimensions();
 
-    let k = 8;
+    let k = 16;
 
     let centroids = init_centroids(&image, k);
 
@@ -33,9 +34,33 @@ fn main() -> Result<()> {
         })
         .block_on()
         .ok_or(anyhow::anyhow!("Couldn't create the adapter"))?;
+
+    let features = adapter.features();
     let (device, queue) = adapter
-        .request_device(&Default::default(), None)
+        .request_device(
+            &wgpu::DeviceDescriptor {
+                label: None,
+                features: features & (Features::TIMESTAMP_QUERY),
+                limits: Default::default(),
+            },
+            None,
+        )
         .block_on()?;
+
+    let query_set = if features.contains(Features::TIMESTAMP_QUERY) {
+        Some(device.create_query_set(&wgpu::QuerySetDescriptor {
+            count: 2,
+            ty: wgpu::QueryType::Timestamp,
+            label: None,
+        }))
+    } else {
+        None
+    };
+    let query_buf = device.create_buffer_init(&BufferInitDescriptor {
+        label: None,
+        contents: &[0; 16],
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+    });
 
     let texture_size = wgpu::Extent3d {
         width,
@@ -73,14 +98,14 @@ fn main() -> Result<()> {
         usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::STORAGE_BINDING,
     });
 
-    let centroid_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let centroid_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label: None,
         contents: &centroids,
         usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
     });
 
     let size = next_multiple_of(256 * 8, width * height) as usize;
-    let calculated_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let calculated_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label: None,
         contents: bytemuck::cast_slice::<u32, u8>(&vec![k + 1; size]),
         usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
@@ -248,6 +273,9 @@ fn main() -> Result<()> {
 
     let mut encoder =
         device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    if let Some(query_set) = &query_set {
+        encoder.write_timestamp(query_set, 0);
+    }
 
     let (dispatch_with, dispatch_height) =
         compute_work_group_count((texture_size.width, texture_size.height), (16, 16));
@@ -276,6 +304,9 @@ fn main() -> Result<()> {
         compute_pass.set_pipeline(&swap_pipeline);
         compute_pass.set_bind_group(0, &swap_bind_group, &[]);
         compute_pass.dispatch(dispatch_with, dispatch_height, 1);
+    }
+    if let Some(query_set) = &query_set {
+        encoder.write_timestamp(query_set, 1);
     }
 
     let padded_bytes_per_row = padded_bytes_per_row(width);
@@ -318,6 +349,9 @@ fn main() -> Result<()> {
 
     encoder.copy_buffer_to_buffer(&centroid_buffer, 0, &staging_buffer, 0, centroid_size);
 
+    if let Some(query_set) = &query_set {
+        encoder.resolve_query_set(query_set, 0..2, &query_buf, 0);
+    }
     queue.submit(Some(encoder.finish()));
 
     let buffer_slice = output_buffer.slice(..);
@@ -327,6 +361,9 @@ fn main() -> Result<()> {
     let cent_buffer_slice = staging_buffer.slice(..);
     // Gets the future representing when `staging_buffer` can be read from
     let cent_buffer_future = cent_buffer_slice.map_async(wgpu::MapMode::Read);
+
+    let query_slice = query_buf.slice(..);
+    let query_future = query_slice.map_async(wgpu::MapMode::Read);
 
     device.poll(wgpu::Maintain::Wait);
 
@@ -338,6 +375,18 @@ fn main() -> Result<()> {
             .enumerate()
         {
             println!("Centroid {index} = {k:?}")
+        }
+    }
+
+    if query_future.block_on().is_ok() {
+        if features.contains(Features::TIMESTAMP_QUERY) {
+            let ts_period = queue.get_timestamp_period();
+            let ts_data_raw = &*query_slice.get_mapped_range();
+            let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
+            println!(
+                "Compute shader elapsed: {:?}ms",
+                (ts_data[1] - ts_data[0]) as f64 * ts_period as f64 * 1e-6
+            );
         }
     }
 
