@@ -14,6 +14,7 @@ fn main() -> Result<()> {
         .arg(
             Arg::new("k")
                 .short('k')
+                .help("K value, aka the number of colors we want to extract")
                 .takes_value(true)
                 .default_value("8")
                 .validator(|input| input.parse::<u32>()),
@@ -21,14 +22,33 @@ fn main() -> Result<()> {
         .arg(
             Arg::new("input")
                 .short('i')
+                .long("input")
+                .help("Input file, required")
                 .required(true)
                 .takes_value(true),
         )
         .arg(
+            Arg::new("output")
+                .short('o')
+                .long("output")
+                .help("Optional output file")
+                .required(false)
+                .takes_value(true)
+                .validator(|input| {
+                    if input.ends_with(".png") || input.ends_with(".jpg") {
+                        Ok(())
+                    } else {
+                        Err(String::from("Filters only support png or jpg files"))
+                    }
+                }),
+        )
+        .arg(
             Arg::new("extension")
                 .long("ext")
+                .help("Optional extension to use if an output file is not specified")
                 .takes_value(true)
-                .default_value("png"),
+                .default_value("png")
+                .possible_values(["png", "jpg"]),
         )
         .get_matches();
 
