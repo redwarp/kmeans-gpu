@@ -22,3 +22,16 @@ cargo run --release -- -i .\gfx\tokyo.jpg -k 4
 ```
 
 ![Tokyo with k=4](gfx/tokyo-k4.png)
+
+## Sources
+
+I had to read a bunch of stuff to even start to make sense of it all.
+* First of all, the excellent [kmeans-colors](https://github.com/okaneco/kmeans-colors) inspired this project.
+* A few articles from [Muthukrishnan](https://muthu.co/):
+  + https://muthu.co/reduce-the-number-of-colors-of-an-image-using-uniform-quantization/
+  + https://muthu.co/reduce-the-number-of-colors-of-an-image-using-k-means-clustering/
+  + https://muthu.co/mathematics-behind-k-mean-clustering-algorithm/
+* About prefix sum:
+  + https://en.wikipedia.org/wiki/Prefix_sum
+  + Prefix sum in wgsl: https://github.com/googlefonts/compute-shader-101/blob/prefix/compute-shader-hello/src/shader.wgsl
+  + https://github.com/linebender/piet-gpu/blob/prefix/piet-gpu-hal/examples/shader/prefix.comp
