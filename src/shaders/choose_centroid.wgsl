@@ -11,8 +11,12 @@ struct AtomicBuffer {
     data: array<atomic<u32>>;
 };
 
-struct Settings {
+struct KIndex {
     k: u32;
+};
+
+struct Settings {
+    n_seq: u32;
 };
 
 [[group(0), binding(0)]] var<storage, read_write> centroids: Centroids;
@@ -21,11 +25,10 @@ struct Settings {
 [[group(1), binding(0)]] var<storage, read_write> prefix_buffer: AtomicBuffer;
 [[group(1), binding(1)]] var<storage, read_write> flag_buffer: AtomicBuffer;
 [[group(1), binding(2)]] var<storage, read_write> convergence: AtomicBuffer;
-[[group(2), binding(0)]] var<uniform> settings: Settings;
-
+[[group(1), binding(3)]] var<uniform> settings: Settings;
+[[group(2), binding(0)]] var<uniform> k_index: KIndex;
 
 let workgroup_size: u32 = 256u;
-let N_SEQ: u32 = 8u;
 
 var<workgroup> scratch: array<vec4<f32>, workgroup_size>;
 var<workgroup> shared_prefix: vec4<f32>;
@@ -74,14 +77,14 @@ fn main(
     [[builtin(workgroup_id)]] workgroup_id : vec3<u32>,
     [[builtin(global_invocation_id)]] global_id : vec3<u32>,
 ) {
-    let k = settings.k;
+    let k = k_index.k;
+    let N_SEQ = settings.n_seq;
 
     if (atomicLoad(&convergence.data[centroids.count]) >= centroids.count) {
         return;
     }
 
     let dimensions = textureDimensions(pixels);
-    let xyz = calculated.data[0];
     let global_x = global_id.x;
    
     scratch[local_id.x] = vec4<f32>(0.0);
@@ -92,7 +95,7 @@ fn main(
 
     var local: vec4<f32> = vec4<f32>(0.0);
     for (var i: u32 = 0u; i < N_SEQ; i = i + 1u) {
-        if (match_centroid(k, global_x * N_SEQ + i) && in_bounds(global_x * N_SEQ + i, dimensions)) {
+        if (in_bounds(global_x * N_SEQ + i, dimensions) && match_centroid(k, global_x * N_SEQ + i)) {
             local = local + vec4<f32>(textureLoad(pixels, coords(global_x * N_SEQ + i, dimensions), 0).rgb, 1.0);
         }
     }
@@ -198,8 +201,8 @@ fn main(
         }
 
         if (k == centroids.count - 1u) {
-            var converge = 0u;
-            for (var i = 0u; i < centroids.count; i = i + 1u) {
+            var converge = atomicLoad(&convergence.data[0u]);
+            for (var i = 1u; i < centroids.count; i = i + 1u) {
                 converge = converge + atomicLoad(&convergence.data[i]);
             }
             atomicStore(&convergence.data[centroids.count], converge);

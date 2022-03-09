@@ -8,6 +8,9 @@ use wgpu::{
     BufferDescriptor, BufferUsages, Features, TextureViewDescriptor,
 };
 
+const WORKGROUP_SIZE: u32 = 256;
+const N_SEQ: u32 = 24;
+
 pub struct Image {
     pub(crate) dimensions: (u32, u32),
     pub(crate) rgba: Vec<u8>,
@@ -50,7 +53,7 @@ pub fn kmeans(k: u32, image: &Image) -> Result<Image> {
             compatible_surface: None,
         })
         .block_on()
-        .ok_or(anyhow::anyhow!("Couldn't create the adapter"))?;
+        .ok_or_else(|| anyhow::anyhow!("Couldn't create the adapter"))?;
 
     let features = adapter.features();
     let (device, queue) = adapter
@@ -121,10 +124,10 @@ pub fn kmeans(k: u32, image: &Image) -> Result<Image> {
         usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
     });
 
-    let size = next_multiple_of(256 * 8, width * height) as usize;
+    let index_size = width * height;
     let calculated_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label: None,
-        contents: bytemuck::cast_slice::<u32, u8>(&vec![k + 1; size]),
+        contents: bytemuck::cast_slice::<u32, u8>(&vec![k + 1; index_size as usize]),
         usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
     });
 
@@ -195,17 +198,23 @@ pub fn kmeans(k: u32, image: &Image) -> Result<Image> {
         ],
     });
 
-    let color_buffer_size = size / (256 * 8) * 8 * 4;
+    let choose_centroid_settings_buffer = device.create_buffer_init(&BufferInitDescriptor {
+        label: None,
+        contents: bytemuck::cast_slice(&[N_SEQ]),
+        usage: BufferUsages::UNIFORM,
+    });
+
+    let color_buffer_size = index_size / (WORKGROUP_SIZE * N_SEQ) * 8 * 4;
     let color_buffer = device.create_buffer(&BufferDescriptor {
         label: None,
         size: color_buffer_size as BufferAddress,
         usage: BufferUsages::STORAGE,
         mapped_at_creation: false,
     });
-    let state_buffer_size = size / (256 * 8);
+    let state_buffer_size = index_size / (WORKGROUP_SIZE * N_SEQ);
     let state_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label: None,
-        contents: bytemuck::cast_slice::<u32, u8>(&vec![0; state_buffer_size]),
+        contents: bytemuck::cast_slice::<u32, u8>(&vec![0; state_buffer_size as usize]),
         usage: BufferUsages::STORAGE,
     });
     let convergence_buffer = device.create_buffer_init(&BufferInitDescriptor {
@@ -230,10 +239,14 @@ pub fn kmeans(k: u32, image: &Image) -> Result<Image> {
                 binding: 2,
                 resource: convergence_buffer.as_entire_binding(),
             },
+            BindGroupEntry {
+                binding: 3,
+                resource: choose_centroid_settings_buffer.as_entire_binding(),
+            },
         ],
     });
 
-    let settings_buffer: Vec<Buffer> = (0..k)
+    let k_index_buffers: Vec<Buffer> = (0..k)
         .map(|k| {
             device.create_buffer_init(&BufferInitDescriptor {
                 label: None,
@@ -243,7 +256,7 @@ pub fn kmeans(k: u32, image: &Image) -> Result<Image> {
         })
         .collect();
 
-    let settings_bind_groups: Vec<_> = (0..k)
+    let k_index_bind_groups: Vec<_> = (0..k)
         .map(|k| {
             device.create_bind_group(&BindGroupDescriptor {
                 label: None,
@@ -251,7 +264,7 @@ pub fn kmeans(k: u32, image: &Image) -> Result<Image> {
                 entries: &[BindGroupEntry {
                     binding: 0,
                     resource: BindingResource::Buffer(BufferBinding {
-                        buffer: &settings_buffer[k as usize],
+                        buffer: &k_index_buffers[k as usize],
                         offset: 0,
                         size: None,
                     }),
@@ -301,6 +314,7 @@ pub fn kmeans(k: u32, image: &Image) -> Result<Image> {
 
     let (dispatch_with, dispatch_height) =
         compute_work_group_count((texture_size.width, texture_size.height), (16, 16));
+    let choose_centroid_dispatch_width = (index_size / (WORKGROUP_SIZE * N_SEQ)) as u32;
     {
         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Kmean pass"),
@@ -314,8 +328,8 @@ pub fn kmeans(k: u32, image: &Image) -> Result<Image> {
             compute_pass.set_bind_group(0, &choose_centroid_bind_group_0, &[]);
             compute_pass.set_bind_group(1, &choose_centroid_bind_group_1, &[]);
             for i in 0..k {
-                compute_pass.set_bind_group(2, &settings_bind_groups[i as usize], &[]);
-                compute_pass.dispatch((size / (256 * 8)) as u32, 1, 1);
+                compute_pass.set_bind_group(2, &k_index_bind_groups[i as usize], &[]);
+                compute_pass.dispatch(choose_centroid_dispatch_width, 1, 1);
             }
 
             compute_pass.set_pipeline(&find_centroid_pipeline);
@@ -410,7 +424,6 @@ pub fn kmeans(k: u32, image: &Image) -> Result<Image> {
 
     match buffer_future.block_on() {
         Ok(()) => {
-            println!("We mapped the data back");
             let padded_data = buffer_slice.get_mapped_range();
 
             let mut pixels: Vec<u8> = vec![0; unpadded_bytes_per_row * height as usize];
@@ -423,11 +436,6 @@ pub fn kmeans(k: u32, image: &Image) -> Result<Image> {
 
             let result = Image::new((width, height), pixels);
 
-            // if let Some(output_image) =
-            //     image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(width, height, &pixels[..])
-            // {
-            //     output_image.save("kmean.png")?;
-            // }
             Ok(result)
         }
         Err(e) => Err(e.into()),
@@ -489,9 +497,4 @@ fn padded_bytes_per_row(width: u32) -> usize {
     let bytes_per_row = width as usize * 4;
     let padding = (256 - bytes_per_row % 256) % 256;
     bytes_per_row + padding
-}
-
-fn next_multiple_of(multiple: u32, value: u32) -> u32 {
-    let padding = (multiple - value % multiple) % multiple;
-    value + padding
 }
