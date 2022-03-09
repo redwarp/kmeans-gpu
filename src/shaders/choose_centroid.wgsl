@@ -1,6 +1,6 @@
 struct Centroids {
     count: u32;
-    data: array<u32>;
+    data: array<f32>;
 };
 
 struct Indices {
@@ -21,18 +21,17 @@ struct Settings {
 
 [[group(0), binding(0)]] var<storage, read_write> centroids: Centroids;
 [[group(0), binding(1)]] var<storage, read> calculated: Indices;
-[[group(0), binding(2)]] var pixels: texture_2d<u32>;
+[[group(0), binding(2)]] var pixels: texture_2d<f32>;
 [[group(1), binding(0)]] var<storage, read_write> prefix_buffer: ColorBuffer;
 [[group(1), binding(1)]] var<storage, read_write> flag_buffer: StateBuffer;
 [[group(2), binding(0)]] var<uniform> settings: Settings;
 
 
 let workgroup_size: u32 = 256u;
-let workgroup_size_3: u32 = 768u;
 let N_SEQ: u32 = 8u;
 
-var<workgroup> scratch: array<vec4<u32>, workgroup_size_3>;
-var<workgroup> shared_prefix: vec4<u32>;
+var<workgroup> scratch: array<vec4<f32>, workgroup_size>;
+var<workgroup> shared_prefix: vec4<f32>;
 var<workgroup> shared_flag: u32;
 
 let FLAG_NOT_READY = 0u;
@@ -57,19 +56,19 @@ fn match_centroid(k: u32, global_x: u32) -> bool {
     return calculated.data[global_x] == k;
 }
 
-fn atomicStorePrefixVec(index: u32, value: vec4<u32>) {
-    atomicStore(&prefix_buffer.data[index + 0u], value.r);
-    atomicStore(&prefix_buffer.data[index + 1u], value.g);
-    atomicStore(&prefix_buffer.data[index + 2u], value.b);
-    atomicStore(&prefix_buffer.data[index + 3u], value.a);
+fn atomicStorePrefixVec(index: u32, value: vec4<f32>) {
+    atomicStore(&prefix_buffer.data[index + 0u], bitcast<u32>(value.r));
+    atomicStore(&prefix_buffer.data[index + 1u], bitcast<u32>(value.g));
+    atomicStore(&prefix_buffer.data[index + 2u], bitcast<u32>(value.b));
+    atomicStore(&prefix_buffer.data[index + 3u], bitcast<u32>(value.a));
 }
 
-fn atomicLoadPrefixVec(index: u32) -> vec4<u32> {
-    let r = atomicLoad(&prefix_buffer.data[index + 0u]);
-    let g = atomicLoad(&prefix_buffer.data[index + 1u]);
-    let b = atomicLoad(&prefix_buffer.data[index + 2u]);
-    let a = atomicLoad(&prefix_buffer.data[index + 3u]);
-    return vec4<u32>(r, g, b, a);
+fn atomicLoadPrefixVec(index: u32) -> vec4<f32> {
+    let r = bitcast<f32>(atomicLoad(&prefix_buffer.data[index + 0u]));
+    let g = bitcast<f32>(atomicLoad(&prefix_buffer.data[index + 1u]));
+    let b = bitcast<f32>(atomicLoad(&prefix_buffer.data[index + 2u]));
+    let a = bitcast<f32>(atomicLoad(&prefix_buffer.data[index + 3u]));
+    return vec4<f32>(r, g, b, a);
 }
 
 [[stage(compute), workgroup_size(256)]]
@@ -83,16 +82,16 @@ fn main(
     let global_x = global_id.x;
    
     let k = settings.k;
-    scratch[local_id.x] = vec4<u32>(0u);
+    scratch[local_id.x] = vec4<f32>(0.0);
     if (local_id.x == workgroup_size - 1u) {
         atomicStore(&flag_buffer.state[workgroup_id.x], FLAG_NOT_READY);
     }
     storageBarrier();
 
-    var local: vec4<u32> = vec4<u32>(0u);
+    var local: vec4<f32> = vec4<f32>(0.0);
     for (var i: u32 = 0u; i < N_SEQ; i = i + 1u) {
         if (match_centroid(k, global_x * N_SEQ + i) && in_bounds(global_x * N_SEQ + i, dimensions)) {
-            local = local + vec4<u32>(textureLoad(pixels, coords(global_x * N_SEQ + i, dimensions), 0).rgb, 1u);
+            local = local + vec4<f32>(textureLoad(pixels, coords(global_x * N_SEQ + i, dimensions), 0).rgb, 1.0);
         }
     }
 
@@ -108,7 +107,7 @@ fn main(
         scratch[local_id.x] = local;
     }
     
-    var exclusive_prefix = vec4<u32>(0u);
+    var exclusive_prefix = vec4<f32>(0.0);
     var flag = FLAG_AGGREGATE_READY;
     
     if (local_id.x == workgroup_size - 1u) {
@@ -166,7 +165,7 @@ fn main(
         }
     }
 
-    var prefix = vec4<u32>(0u);
+    var prefix = vec4<f32>(0.0);
     workgroupBarrier();
     if(workgroup_id.x != 0u){
         prefix = shared_prefix;
@@ -174,15 +173,11 @@ fn main(
 
     if (workgroup_id.x == last_group_idx() & local_id.x == workgroup_size - 1u) {
         let sum = prefix + scratch[local_id.x];
-        if(sum.a > 0u) {
+        if(sum.a > 0.0) {
             centroids.data[k * 4u + 0u] = sum.r / sum.a;
             centroids.data[k * 4u + 1u] = sum.g / sum.a;
             centroids.data[k * 4u + 2u] = sum.b / sum.a;
-            centroids.data[k * 4u + 3u] = 255u;
-            // centroids.data[k * 4u + 0u] = sum.r;
-            // centroids.data[k * 4u + 1u] = sum.g;
-            // centroids.data[k * 4u + 2u] = sum.b;
-            // centroids.data[k * 4u + 3u] = sum.a;
+            centroids.data[k * 4u + 3u] = 1.0;
         }
     }
     storageBarrier();

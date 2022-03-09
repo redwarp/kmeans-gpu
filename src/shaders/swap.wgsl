@@ -1,6 +1,6 @@
 struct Centroids {
     count: u32;
-    data: array<u32>;
+    data: array<f32>;
 };
 
 struct Indices {
@@ -9,7 +9,7 @@ struct Indices {
 
 [[group(0), binding(0)]] var<storage, read> centroids: Centroids;
 [[group(0), binding(1)]] var<storage, read> calculated: Indices;
-[[group(0), binding(2)]] var output_texture : texture_storage_2d<rgba8uint, write>;
+[[group(0), binding(2)]] var output_texture : texture_storage_2d<rgba8unorm, write>;
 
 [[stage(compute), workgroup_size(16, 16)]]
 fn main(
@@ -23,7 +23,7 @@ fn main(
     }
 
     let index = calculated.data[global_id.y * u32(dimensions.x) + global_id.x];
-    let color = vec4<u32>(
+    let color = vec4<f32>(
         centroids.data[index * 4u + 0u],
         centroids.data[index * 4u + 1u],
         centroids.data[index * 4u + 2u],

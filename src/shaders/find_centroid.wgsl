@@ -1,22 +1,22 @@
 struct Centroids {
     count: u32;
-    data: array<u32>;
+    data: array<f32>;
 };
 
 struct Indices {
     data: array<u32>;
 };
 
-[[group(0), binding(0)]] var pixels: texture_2d<u32>;
+[[group(0), binding(0)]] var pixels: texture_2d<f32>;
 [[group(0), binding(1)]] var<storage, read> centroids: Centroids;
 [[group(0), binding(2)]] var<storage, write> calculated: Indices;
 
 let max_int : u32 = 4294967295u;
 let max_f32: f32 = 1000.0;
 
-fn distance_not_sqrt(one: vec4<u32>, other: vec4<u32>) -> u32 {
+fn distance_not_sqrt(one: vec4<f32>, other: vec4<f32>) -> f32 {
     // return distance(vec4<f32>(one), vec4<f32>(other));
-    var length: vec4<u32> = one - other;
+    var length: vec4<f32> = one - other;
 
     return length.r * length.r + length.g * length.g + length.b * length.b;
 }
@@ -32,23 +32,21 @@ fn main(
         return;
     }
 
-    let pixel : vec4<u32> = textureLoad(pixels, coords.xy, 0);
+    let pixel : vec4<f32> = textureLoad(pixels, coords.xy, 0);
 
-    var min_distance: u32 = max_int;
+    var min_distance: f32 = max_f32;
     var found_index: u32 = centroids.count;
 
     for(var index: u32 = 0u; index < centroids.count; index = index + 1u){
-        let centroid_components : vec4<u32> = vec4<u32>(
+        let centroid_components : vec4<f32> = vec4<f32>(
             centroids.data[index * 4u + 0u],
             centroids.data[index * 4u + 1u],
             centroids.data[index * 4u + 2u],
             centroids.data[index * 4u + 3u],
         );
 
-        let distance: u32 = distance_not_sqrt(pixel, centroid_components);
+        let distance: f32 = distance_not_sqrt(pixel, centroid_components);
         let smaller = bool(distance < min_distance);
-        // min_distance = distance * u32(smaller) + min_distance * u32(!smaller);
-        // found_index = index * u32(smaller) + found_index * u32(!smaller);
 
         if (smaller) {            
             min_distance = distance;

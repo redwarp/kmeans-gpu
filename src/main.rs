@@ -1,17 +1,12 @@
 use anyhow::Result;
 use image::{ImageBuffer, Rgba};
 use pollster::FutureExt;
-use rand::rngs::StdRng;
-use rand::Rng;
-use rand::SeedableRng;
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::vec;
-use wgpu::util::BufferInitDescriptor;
-use wgpu::Buffer;
-use wgpu::BufferBinding;
-use wgpu::Features;
 use wgpu::{
-    util::DeviceExt, BindGroupDescriptor, BindGroupEntry, BindingResource, BufferAddress,
-    BufferDescriptor, BufferUsages, TextureViewDescriptor,
+    util::{BufferInitDescriptor, DeviceExt},
+    BindGroupDescriptor, BindGroupEntry, BindingResource, Buffer, BufferAddress, BufferBinding,
+    BufferDescriptor, BufferUsages, Features, TextureViewDescriptor,
 };
 
 fn main() -> Result<()> {
@@ -74,7 +69,7 @@ fn main() -> Result<()> {
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Uint,
+        format: wgpu::TextureFormat::Rgba8Unorm,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
     });
     queue.write_texture(
@@ -83,7 +78,7 @@ fn main() -> Result<()> {
         wgpu::ImageDataLayout {
             offset: 0,
             bytes_per_row: std::num::NonZeroU32::new(4 * width),
-            rows_per_image: None, // Doesn't need to be specified as we are writing a single image.
+            rows_per_image: None,
         },
         texture_size,
     );
@@ -94,7 +89,7 @@ fn main() -> Result<()> {
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Uint,
+        format: wgpu::TextureFormat::Rgba8Unorm,
         usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::STORAGE_BINDING,
     });
 
@@ -370,7 +365,7 @@ fn main() -> Result<()> {
     if let Ok(()) = cent_buffer_future.block_on() {
         let data = cent_buffer_slice.get_mapped_range();
 
-        for (index, k) in bytemuck::cast_slice::<u8, u32>(&data[4..])
+        for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[4..])
             .chunks(4)
             .enumerate()
         {
@@ -426,10 +421,10 @@ fn init_centroids(image: &ImageBuffer<Rgba<u8>, Vec<u8>>, k: u32) -> Vec<u8> {
         let y = color_index / width;
         let Rgba(pixel) = image.get_pixel(x, y);
         centroids.extend_from_slice(bytemuck::cast_slice(&[
-            pixel[0] as u32,
-            pixel[1] as u32,
-            pixel[2] as u32,
-            pixel[3] as u32,
+            pixel[0] as f32 / 255.0,
+            pixel[1] as f32 / 255.0,
+            pixel[2] as f32 / 255.0,
+            pixel[3] as f32 / 255.0,
         ]));
     }
 
