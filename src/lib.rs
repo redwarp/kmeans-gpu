@@ -38,7 +38,7 @@ impl Image {
 pub fn kmeans(k: u32, image: &Image) -> Result<Image> {
     let (width, height) = image.dimensions;
 
-    let centroids = init_centroids(&image, k);
+    let centroids = init_centroids(image, k);
 
     println!("Setting up compute");
 
@@ -398,16 +398,14 @@ pub fn kmeans(k: u32, image: &Image) -> Result<Image> {
         }
     }
 
-    if query_future.block_on().is_ok() {
-        if features.contains(Features::TIMESTAMP_QUERY) {
-            let ts_period = queue.get_timestamp_period();
-            let ts_data_raw = &*query_slice.get_mapped_range();
-            let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
-            println!(
-                "Compute shader elapsed: {:?}ms",
-                (ts_data[1] - ts_data[0]) as f64 * ts_period as f64 * 1e-6
-            );
-        }
+    if query_future.block_on().is_ok() && features.contains(Features::TIMESTAMP_QUERY) {
+        let ts_period = queue.get_timestamp_period();
+        let ts_data_raw = &*query_slice.get_mapped_range();
+        let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
+        println!(
+            "Compute shader elapsed: {:?}ms",
+            (ts_data[1] - ts_data[0]) as f64 * ts_period as f64 * 1e-6
+        );
     }
 
     match buffer_future.block_on() {
@@ -432,7 +430,7 @@ pub fn kmeans(k: u32, image: &Image) -> Result<Image> {
             // }
             Ok(result)
         }
-        Err(e) => Err(e)?,
+        Err(e) => Err(e.into()),
     }
 }
 
@@ -444,18 +442,34 @@ fn init_centroids(image: &Image, k: u32) -> Vec<u8> {
 
     let (width, height) = image.dimensions;
     let total_px = width * height;
+    let mut picked_indices = Vec::with_capacity(k as usize);
+
     for _ in 0..k {
-        let color_index = rng.gen_range(0..total_px);
-        let x = color_index % width;
-        let y = color_index / width;
-        let pixel = image.get_pixel(x, y);
-        centroids.extend_from_slice(bytemuck::cast_slice(&[
-            pixel[0] as f32 / 255.0,
-            pixel[1] as f32 / 255.0,
-            pixel[2] as f32 / 255.0,
-            pixel[3] as f32 / 255.0,
-        ]));
+        loop {
+            let color_index = rng.gen_range(0..total_px);
+            if !picked_indices.contains(&color_index) {
+                picked_indices.push(color_index);
+                break;
+            }
+        }
     }
+
+    centroids.extend_from_slice(bytemuck::cast_slice(
+        &picked_indices
+            .into_iter()
+            .flat_map(|color_index| {
+                let x = color_index % width;
+                let y = color_index / width;
+                let pixel = image.get_pixel(x, y);
+                [
+                    pixel[0] as f32 / 255.0,
+                    pixel[1] as f32 / 255.0,
+                    pixel[2] as f32 / 255.0,
+                    pixel[3] as f32 / 255.0,
+                ]
+            })
+            .collect::<Vec<f32>>(),
+    ));
 
     centroids
 }
