@@ -57,6 +57,21 @@ fn match_centroid(k: u32, global_x: u32) -> bool {
     return calculated.data[global_x] == k;
 }
 
+fn atomicStorePrefixVec(index: u32, value: vec4<u32>) {
+    atomicStore(&prefix_buffer.data[index + 0u], value.r);
+    atomicStore(&prefix_buffer.data[index + 1u], value.g);
+    atomicStore(&prefix_buffer.data[index + 2u], value.b);
+    atomicStore(&prefix_buffer.data[index + 3u], value.a);
+}
+
+fn atomicLoadPrefixVec(index: u32) -> vec4<u32> {
+    let r = atomicLoad(&prefix_buffer.data[index + 0u]);
+    let g = atomicLoad(&prefix_buffer.data[index + 1u]);
+    let b = atomicLoad(&prefix_buffer.data[index + 2u]);
+    let a = atomicLoad(&prefix_buffer.data[index + 3u]);
+    return vec4<u32>(r, g, b, a);
+}
+
 [[stage(compute), workgroup_size(256)]]
 fn main(
     [[builtin(local_invocation_id)]] local_id : vec3<u32>,
@@ -72,7 +87,6 @@ fn main(
     if (local_id.x == workgroup_size - 1u) {
         atomicStore(&flag_buffer.state[workgroup_id.x], FLAG_NOT_READY);
     }
-    workgroupBarrier();
     storageBarrier();
 
     var local: vec4<u32> = vec4<u32>(0u);
@@ -80,13 +94,8 @@ fn main(
         if (match_centroid(k, global_x * N_SEQ + i) && in_bounds(global_x * N_SEQ + i, dimensions)) {
             local = local + vec4<u32>(textureLoad(pixels, coords(global_x * N_SEQ + i, dimensions), 0).rgb, 1u);
         }
-        workgroupBarrier();
     }
 
-    // var local: vec4<u32> = vec4<u32>(textureLoad(pixels, coords(global_x * N_SEQ, dimensions), 0).rgb, u32(in_bounds(global_x * N_SEQ, dimensions))) * u32(match_centroid(k, global_x));
-    // for (var i: u32 = 1u; i < N_SEQ; i = i + 1u) {
-    //     local = local + vec4<u32>(textureLoad(pixels, coords(global_x * N_SEQ + i, dimensions), 0).rgb, u32(in_bounds(global_x * N_SEQ + i, dimensions))) * u32(match_centroid(k, global_x));
-    // }
     scratch[local_id.x] = local;
     workgroupBarrier();
     
@@ -103,16 +112,10 @@ fn main(
     var flag = FLAG_AGGREGATE_READY;
     
     if (local_id.x == workgroup_size - 1u) {
-        atomicStore(&prefix_buffer.data[workgroup_id.x * 8u + 4u], local.r);
-        atomicStore(&prefix_buffer.data[workgroup_id.x * 8u + 5u], local.g);
-        atomicStore(&prefix_buffer.data[workgroup_id.x * 8u + 6u], local.b);
-        atomicStore(&prefix_buffer.data[workgroup_id.x * 8u + 7u], local.a);
+        atomicStorePrefixVec(workgroup_id.x * 8u + 4u, local);
         if (workgroup_id.x == 0u) {
             // Special case, group 0 will not need to sum prefix.
-            atomicStore(&prefix_buffer.data[workgroup_id.x * 8u + 0u], local.r);
-            atomicStore(&prefix_buffer.data[workgroup_id.x * 8u + 1u], local.g);
-            atomicStore(&prefix_buffer.data[workgroup_id.x * 8u + 2u], local.b);
-            atomicStore(&prefix_buffer.data[workgroup_id.x * 8u + 3u], local.a);
+            atomicStorePrefixVec(workgroup_id.x * 8u + 0u, local);
             flag = FLAG_PREFIX_READY;
         }
     }
@@ -135,23 +138,13 @@ fn main(
 
             if (flag == FLAG_PREFIX_READY) {
                 if (local_id.x == workgroup_size - 1u) {
-                    let r = atomicLoad(&prefix_buffer.data[loop_back_ix * 8u + 0u]);
-                    let g = atomicLoad(&prefix_buffer.data[loop_back_ix * 8u + 1u]);
-                    let b = atomicLoad(&prefix_buffer.data[loop_back_ix * 8u + 2u]);
-                    let a = atomicLoad(&prefix_buffer.data[loop_back_ix * 8u + 3u]);
-                    let their_prefix = vec4<u32>(r, g, b, a);
-                    // let their_prefix = prefix_buffer.data[loop_back_ix * 2u + 0u];
+                    let their_prefix = atomicLoadPrefixVec(loop_back_ix * 8u);
                     exclusive_prefix = exclusive_prefix + their_prefix;
                 }
                 break;
             } else if (flag == FLAG_AGGREGATE_READY) {                
                 if (local_id.x == workgroup_size - 1u) {                    
-                    let r = atomicLoad(&prefix_buffer.data[loop_back_ix * 8u + 4u]);
-                    let g = atomicLoad(&prefix_buffer.data[loop_back_ix * 8u + 5u]);
-                    let b = atomicLoad(&prefix_buffer.data[loop_back_ix * 8u + 6u]);
-                    let a = atomicLoad(&prefix_buffer.data[loop_back_ix * 8u + 7u]);
-                    let their_aggregate = vec4<u32>(r, g, b, a);
-                    // let their_aggregate = prefix_buffer.data[loop_back_ix * 2u + 1u];
+                    let their_aggregate = atomicLoadPrefixVec(loop_back_ix * 8u + 4u);
                     exclusive_prefix = their_aggregate + exclusive_prefix;
                 }
                 loop_back_ix = loop_back_ix - 1u;
@@ -165,10 +158,7 @@ fn main(
             let inclusive_prefix = exclusive_prefix + local;
             shared_prefix = exclusive_prefix;
             
-            atomicStore(&prefix_buffer.data[workgroup_id.x * 8u + 0u], inclusive_prefix.r);
-            atomicStore(&prefix_buffer.data[workgroup_id.x * 8u + 1u], inclusive_prefix.g);
-            atomicStore(&prefix_buffer.data[workgroup_id.x * 8u + 2u], inclusive_prefix.b);
-            atomicStore(&prefix_buffer.data[workgroup_id.x * 8u + 3u], inclusive_prefix.a);
+            atomicStorePrefixVec(workgroup_id.x * 8u + 0u, inclusive_prefix);
         }
         storageBarrier();
         if (local_id.x == workgroup_size - 1u) {
