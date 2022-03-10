@@ -159,14 +159,15 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
     let centroid_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label: None,
         contents: &centroids,
-        usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+        usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
     });
 
     let index_size = width * height;
-    let calculated_buffer = device.create_buffer_init(&BufferInitDescriptor {
+    let calculated_buffer = device.create_buffer(&BufferDescriptor {
         label: None,
-        contents: bytemuck::cast_slice::<u32, u8>(&vec![k + 1; index_size as usize]),
+        size: (index_size * 4) as BufferAddress,
         usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
     });
 
     let find_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
@@ -336,11 +337,12 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         usage: BufferUsages::STORAGE,
         mapped_at_creation: false,
     });
-    let state_buffer_size = choose_centroid_dispatch_width;
-    let state_buffer = device.create_buffer_init(&BufferInitDescriptor {
+    let state_buffer_size = choose_centroid_dispatch_width * 4;
+    let state_buffer = device.create_buffer(&BufferDescriptor {
         label: None,
-        contents: bytemuck::cast_slice::<u32, u8>(&vec![0; state_buffer_size as usize]),
+        size: state_buffer_size as BufferAddress,
         usage: BufferUsages::STORAGE,
+        mapped_at_creation: false,
     });
     let convergence_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label: None,
