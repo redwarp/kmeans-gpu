@@ -17,6 +17,7 @@ struct KIndex {
 
 struct Settings {
     n_seq: u32;
+    convergence: f32;
 };
 
 [[group(0), binding(0)]] var<storage, read_write> centroids: Centroids;
@@ -193,7 +194,7 @@ fn main(
             centroids.data[k * 4u + 2u] = new_centroid.b;
             centroids.data[k * 4u + 3u] = new_centroid.a;
 
-            atomicStore(&convergence.data[k], u32(distance(new_centroid, previous_centroid) < 0.01));
+            atomicStore(&convergence.data[k], u32(distance(new_centroid, previous_centroid) < settings.convergence));
         }
 
         if (k == centroids.count - 1u) {

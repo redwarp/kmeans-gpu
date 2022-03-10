@@ -48,7 +48,36 @@ impl Image {
     }
 }
 
-pub fn kmeans(k: u32, image: &Image) -> Result<Image> {
+pub enum ColorSpace {
+    Lab,
+    Rgb,
+}
+
+impl ColorSpace {
+    pub fn from(str: &str) -> Option<ColorSpace> {
+        match str {
+            "lab" => Some(ColorSpace::Lab),
+            "rgb" => Some(ColorSpace::Rgb),
+            _ => None,
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            ColorSpace::Lab => "lab",
+            ColorSpace::Rgb => "rgb",
+        }
+    }
+
+    pub fn convergence(&self) -> f32 {
+        match self {
+            ColorSpace::Lab => 0.75,
+            ColorSpace::Rgb => 0.01,
+        }
+    }
+}
+
+pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> {
     let (width, height) = image.dimensions;
 
     let centroids = init_centroids(image, k);
@@ -286,9 +315,13 @@ pub fn kmeans(k: u32, image: &Image) -> Result<Image> {
         ],
     });
 
+    let mut choose_centroid_settings_content: Vec<u8> = Vec::new();
+    choose_centroid_settings_content.extend_from_slice(bytemuck::cast_slice(&[N_SEQ]));
+    choose_centroid_settings_content
+        .extend_from_slice(bytemuck::cast_slice(&[color_space.convergence()]));
     let choose_centroid_settings_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label: None,
-        contents: bytemuck::cast_slice(&[N_SEQ]),
+        contents: &choose_centroid_settings_content,
         usage: BufferUsages::UNIFORM,
     });
 

@@ -8,29 +8,7 @@ use std::{
 use anyhow::Result;
 use clap::{command, Arg};
 use image::{ImageBuffer, Rgb};
-use k_means_gpu::{kmeans, Image};
-
-enum ColorSpace {
-    Lab,
-    Rgb,
-}
-
-impl ColorSpace {
-    fn from(str: &str) -> Option<ColorSpace> {
-        match str {
-            "lab" => Some(ColorSpace::Lab),
-            "rgb" => Some(ColorSpace::Rgb),
-            _ => None,
-        }
-    }
-
-    fn name(&self) -> &'static str {
-        match self {
-            ColorSpace::Lab => "lab",
-            ColorSpace::Rgb => "rgb",
-        }
-    }
-}
+use k_means_gpu::{kmeans, ColorSpace, Image};
 
 fn main() -> Result<()> {
     let matches = command!()
@@ -114,7 +92,7 @@ fn main() -> Result<()> {
 
     let image = Image::new(dimensions, pixels);
 
-    let result = kmeans(k, &image)?;
+    let result = kmeans(k, &image, &color_space)?;
     let (width, height) = result.dimensions();
     let rgb: Vec<u8> = match color_space {
         ColorSpace::Lab => result.into_raw_pixels()[..]
