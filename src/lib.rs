@@ -21,11 +21,8 @@ pub struct Image {
 }
 
 impl Image {
-    pub fn new(dimensions: (u32, u32), rbga: Vec<[f32; 4]>) -> Self {
-        Self {
-            dimensions,
-            rgba: rbga,
-        }
+    pub fn new(dimensions: (u32, u32), rgba: Vec<[f32; 4]>) -> Self {
+        Self { dimensions, rgba }
     }
 
     pub fn from_raw_pixels(dimensions: (u32, u32), rbga: &[f32]) -> Self {
@@ -536,7 +533,7 @@ pub fn kmeans(k: u32, image: &Image) -> Result<Image> {
         compute_pass.set_bind_group(0, &find_centroid_bind_group, &[]);
         compute_pass.dispatch(dispatch_with, dispatch_height, 1);
 
-        for _ in 0..30 {
+        for _ in 0..20 {
             compute_pass.set_pipeline(&choose_centroid_pipeline);
             compute_pass.set_bind_group(0, &choose_centroid_bind_group_0, &[]);
             compute_pass.set_bind_group(1, &choose_centroid_bind_group_1, &[]);
