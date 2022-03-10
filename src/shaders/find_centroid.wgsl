@@ -9,7 +9,7 @@ struct Indices {
 
 [[group(0), binding(0)]] var pixels: texture_2d<f32>;
 [[group(0), binding(1)]] var<storage, read> centroids: Centroids;
-[[group(0), binding(2)]] var<storage, write> calculated: Indices;
+[[group(0), binding(2)]] var<storage, read_write> calculated: Indices;
 
 let max_int : u32 = 4294967295u;
 let max_f32: f32 = 1000.0;
