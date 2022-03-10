@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::Result;
 use clap::{command, Arg};
-use image::{ImageBuffer, Rgba};
+use image::{DynamicImage, ImageBuffer, Rgba};
 use k_means_gpu::{kmeans, Image};
 
 fn main() -> Result<()> {
@@ -55,16 +55,18 @@ fn main() -> Result<()> {
     let k = matches.value_of("k").expect("Has default value").parse()?;
     let input = matches.value_of("input").expect("Required argument");
     let extension = matches.value_of("extension");
-    let image = image::open(input)?.to_rgba8();
+    let image = image::open(input)?.to_rgba32f();
     let image = Image::new(image.dimensions(), image.into_raw().to_vec());
 
     let result = kmeans(k, &image)?;
     let (width, height) = result.dimensions();
     if let Some(output_image) =
-        ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, result.raw_pixels())
+        ImageBuffer::<Rgba<f32>, _>::from_raw(width, height, result.raw_pixels().to_vec())
     {
         let output_file = output_file(None, input, extension, k)?;
-        output_image.save(output_file)?;
+        DynamicImage::ImageRgba32F(output_image)
+            .to_rgba8()
+            .save(output_file)?;
     }
 
     Ok(())
