@@ -43,8 +43,6 @@ pub fn kmeans(k: u32, image: &Image) -> Result<Image> {
 
     let centroids = init_centroids(image, k);
 
-    println!("Setting up compute");
-
     let instance = wgpu::Instance::new(wgpu::Backends::all());
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptionsBase {
@@ -204,14 +202,18 @@ pub fn kmeans(k: u32, image: &Image) -> Result<Image> {
         usage: BufferUsages::UNIFORM,
     });
 
-    let color_buffer_size = index_size / (WORKGROUP_SIZE * N_SEQ) * 8 * 4;
+    let (choose_centroid_dispatch_width, _) = compute_work_group_count(
+        (texture_size.width * texture_size.height, 1),
+        (WORKGROUP_SIZE * N_SEQ, 1),
+    );
+    let color_buffer_size = choose_centroid_dispatch_width * 8 * 4;
     let color_buffer = device.create_buffer(&BufferDescriptor {
         label: None,
         size: color_buffer_size as BufferAddress,
         usage: BufferUsages::STORAGE,
         mapped_at_creation: false,
     });
-    let state_buffer_size = index_size / (WORKGROUP_SIZE * N_SEQ);
+    let state_buffer_size = choose_centroid_dispatch_width;
     let state_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label: None,
         contents: bytemuck::cast_slice::<u32, u8>(&vec![0; state_buffer_size as usize]),
@@ -314,7 +316,6 @@ pub fn kmeans(k: u32, image: &Image) -> Result<Image> {
 
     let (dispatch_with, dispatch_height) =
         compute_work_group_count((texture_size.width, texture_size.height), (16, 16));
-    let choose_centroid_dispatch_width = (index_size / (WORKGROUP_SIZE * N_SEQ)) as u32;
     {
         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Kmean pass"),

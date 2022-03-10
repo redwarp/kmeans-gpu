@@ -77,21 +77,22 @@ fn main(
     [[builtin(workgroup_id)]] workgroup_id : vec3<u32>,
     [[builtin(global_invocation_id)]] global_id : vec3<u32>,
 ) {
-    let k = k_index.k;
-    let N_SEQ = settings.n_seq;
-
     if (atomicLoad(&convergence.data[centroids.count]) >= centroids.count) {
         return;
     }
+    
+    if (local_id.x == workgroup_size - 1u) {
+        atomicStore(&flag_buffer.data[workgroup_id.x], FLAG_NOT_READY);
+    }
+    storageBarrier();
+
+    let k = k_index.k;
+    let N_SEQ = settings.n_seq;
 
     let dimensions = textureDimensions(pixels);
     let global_x = global_id.x;
    
     scratch[local_id.x] = vec4<f32>(0.0);
-    if (local_id.x == workgroup_size - 1u) {
-        atomicStore(&flag_buffer.data[workgroup_id.x], FLAG_NOT_READY);
-    }
-    storageBarrier();
 
     var local: vec4<f32> = vec4<f32>(0.0);
     for (var i: u32 = 0u; i < N_SEQ; i = i + 1u) {
@@ -179,12 +180,7 @@ fn main(
     if (workgroup_id.x == last_group_idx() & local_id.x == workgroup_size - 1u) {
         let sum = prefix + scratch[local_id.x];
         if(sum.a > 0.0) {
-            let new_centroid = vec4<f32>(
-                sum.r / sum.a,
-                sum.g / sum.a,
-                sum.b / sum.a,
-                1.0
-            );
+            let new_centroid = vec4<f32>(sum.rgb / sum.a, 1.0);
             let previous_centroid = vec4<f32>(
                 centroids.data[k * 4u + 0u],
                 centroids.data[k * 4u + 1u],
