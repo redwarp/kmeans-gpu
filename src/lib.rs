@@ -17,28 +17,37 @@ const N_SEQ: u32 = 24;
 
 pub struct Image {
     pub(crate) dimensions: (u32, u32),
-    pub(crate) rgba: Vec<f32>,
+    pub(crate) rgba: Vec<[f32; 4]>,
 }
 
 impl Image {
-    pub fn new(dimensions: (u32, u32), rbga: Vec<f32>) -> Self {
+    pub fn new(dimensions: (u32, u32), rbga: Vec<[f32; 4]>) -> Self {
         Self {
             dimensions,
             rgba: rbga,
         }
     }
 
-    pub fn get_pixel(&self, x: u32, y: u32) -> &[f32] {
-        let index = (x + y * self.dimensions.0) as usize * 4;
-        &self.rgba[index..index + 4]
+    pub fn from_raw_pixels(dimensions: (u32, u32), rbga: &[f32]) -> Self {
+        let mut pixels = Vec::with_capacity(dimensions.0 as usize * dimensions.1 as usize);
+        pixels.extend_from_slice(bytemuck::cast_slice(rbga));
+        Self {
+            dimensions,
+            rgba: pixels,
+        }
+    }
+
+    pub fn get_pixel(&self, x: u32, y: u32) -> &[f32; 4] {
+        let index = (x + y * self.dimensions.0) as usize;
+        &self.rgba[index]
     }
 
     pub fn dimensions(&self) -> (u32, u32) {
         self.dimensions
     }
 
-    pub fn raw_pixels(&self) -> &[f32] {
-        &self.rgba
+    pub fn into_raw_pixels(self) -> Vec<f32> {
+        self.rgba.into_iter().flatten().collect()
     }
 }
 
@@ -630,18 +639,11 @@ pub fn kmeans(k: u32, image: &Image) -> Result<Image> {
         Ok(()) => {
             let padded_data = buffer_slice.get_mapped_range();
             let mut pixels: Vec<f32> = Vec::with_capacity(4 * width as usize * height as usize);
-            // let mut pixels: Vec<f32> = vec![0.0; unpadded_bytes_per_row * height as usize];
-            // for (padded, pixels) in padded_data
-            //     .chunks_exact(padded_bytes_per_row)
-            //     .zip(pixels.chunks_exact_mut(unpadded_bytes_per_row))
-            // {
-            //     pixels.copy_from_slice(&padded[..unpadded_bytes_per_row]);
-            // }
             for padded in padded_data.chunks_exact(padded_bytes_per_row) {
                 pixels.extend_from_slice(bytemuck::cast_slice(&padded[..unpadded_bytes_per_row]));
             }
 
-            let result = Image::new((width, height), pixels);
+            let result = Image::from_raw_pixels((width, height), &pixels);
 
             Ok(result)
         }
@@ -675,13 +677,7 @@ fn init_centroids(image: &Image, k: u32) -> Vec<u8> {
             .flat_map(|color_index| {
                 let x = color_index % width;
                 let y = color_index / width;
-                let pixel = image.get_pixel(x, y);
-                [
-                    pixel[0] as f32 / 255.0,
-                    pixel[1] as f32 / 255.0,
-                    pixel[2] as f32 / 255.0,
-                    pixel[3] as f32 / 255.0,
-                ]
+                image.get_pixel(x, y).clone()
             })
             .collect::<Vec<f32>>(),
     ));

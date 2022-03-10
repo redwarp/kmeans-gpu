@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::Result;
 use clap::{command, Arg};
-use image::{DynamicImage, ImageBuffer, Rgba};
+use image::{DynamicImage, GenericImageView, ImageBuffer, Rgb, Rgba};
 use k_means_gpu::{kmeans, Image};
 
 fn main() -> Result<()> {
@@ -55,18 +55,37 @@ fn main() -> Result<()> {
     let k = matches.value_of("k").expect("Has default value").parse()?;
     let input = matches.value_of("input").expect("Required argument");
     let extension = matches.value_of("extension");
-    let image = image::open(input)?.to_rgba32f();
-    let image = Image::new(image.dimensions(), image.into_raw().to_vec());
+    let image = image::open(input)?.to_rgb8();
+    let dimensions = image.dimensions();
+    let pixels = image.into_raw()[..]
+        .chunks_exact(3)
+        .map(|rgb| {
+            [
+                rgb[0] as f32 / 255.0,
+                rgb[1] as f32 / 255.0,
+                rgb[1] as f32 / 255.0,
+                1.0,
+            ]
+        })
+        .collect::<Vec<[f32; 4]>>();
+    let image = Image::new(dimensions, pixels);
 
     let result = kmeans(k, &image)?;
     let (width, height) = result.dimensions();
-    if let Some(output_image) =
-        ImageBuffer::<Rgba<f32>, _>::from_raw(width, height, result.raw_pixels().to_vec())
-    {
+    let pixels: Vec<_> = result.into_raw_pixels()[..]
+        .chunks_exact(4)
+        .map(|rgba| {
+            [
+                (rgba[0] * 255.0) as u8,
+                (rgba[1] * 255.0) as u8,
+                (rgba[2] * 255.0) as u8,
+            ]
+        })
+        .flatten()
+        .collect();
+    if let Some(output_image) = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, pixels) {
         let output_file = output_file(None, input, extension, k)?;
-        DynamicImage::ImageRgba32F(output_image)
-            .to_rgba8()
-            .save(output_file)?;
+        output_image.save(output_file)?;
     }
 
     Ok(())
