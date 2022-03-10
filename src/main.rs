@@ -46,6 +46,7 @@ fn main() -> Result<()> {
         .arg(
             Arg::new("extension")
                 .long("ext")
+                .short('e')
                 .help("Optional extension to use if an output file is not specified")
                 .takes_value(true)
                 .default_value("png")
@@ -55,6 +56,7 @@ fn main() -> Result<()> {
             Arg::new("colorspace")
                 .long("colorspace")
                 .short('c')
+                .help("The colorspace to use when clustering colors. Lab gives more natural colors")
                 .takes_value(true)
                 .possible_values(["rgb", "lab"])
                 .default_value("lab"),
