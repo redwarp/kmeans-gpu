@@ -23,6 +23,13 @@ impl ColorSpace {
             _ => None,
         }
     }
+
+    fn name(&self) -> &'static str {
+        match self {
+            ColorSpace::Lab => "lab",
+            ColorSpace::Rgb => "rgb",
+        }
+    }
 }
 
 fn main() -> Result<()> {
@@ -85,15 +92,13 @@ fn main() -> Result<()> {
     let image = image::open(input)?.to_rgb8();
     let dimensions = image.dimensions();
     let pixels = match color_space {
-        ColorSpace::Lab => {
-            let lab: Vec<Lab> = Srgb::from_raw_slice(&image.into_raw())
-                .into_iter()
-                .map(|rgb| rgb.into_format::<f32>().into_color())
-                .collect();
-            lab.into_iter()
-                .map(|lab| [lab.l, lab.a, lab.b, 1.0])
-                .collect()
-        }
+        ColorSpace::Lab => Srgb::from_raw_slice(&image.into_raw())
+            .into_iter()
+            .map(|rgb| {
+                let lab = IntoColor::<Lab>::into_color(rgb.into_format::<f32>());
+                [lab.l, lab.a, lab.b, 1.0]
+            })
+            .collect(),
         ColorSpace::Rgb => image.into_raw()[..]
             .chunks_exact(3)
             .map(|rgb| {
@@ -111,19 +116,16 @@ fn main() -> Result<()> {
 
     let result = kmeans(k, &image)?;
     let (width, height) = result.dimensions();
-    let rgb = match color_space {
-        ColorSpace::Lab => {
-            let rgb: Vec<Srgb<u8>> = result.into_raw_pixels()[..]
-                .chunks_exact(4)
-                .map(|lab| {
-                    IntoColor::<Srgb>::into_color(Lab::new(lab[0], lab[1], lab[2])).into_format()
-                })
-                .collect::<Vec<Srgb<u8>>>();
-            rgb.into_iter()
-                .map(|rgba| [rgba.red, rgba.blue, rgba.green])
-                .flatten()
-                .collect::<Vec<u8>>()
-        }
+    let rgb: Vec<u8> = match color_space {
+        ColorSpace::Lab => result.into_raw_pixels()[..]
+            .chunks_exact(4)
+            .map(|lab| {
+                IntoColor::<Srgb>::into_color(Lab::new(lab[0], lab[1], lab[2]))
+                    .into_format()
+                    .into_raw::<[u8; 3]>()
+            })
+            .flatten()
+            .collect(),
         ColorSpace::Rgb => result.into_raw_pixels()[..]
             .chunks_exact(4)
             .map(|rgba| {
@@ -138,7 +140,7 @@ fn main() -> Result<()> {
     };
 
     if let Some(output_image) = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, rgb) {
-        let output_file = output_file(None, input, extension, k)?;
+        let output_file = output_file(None, input, extension, k, &color_space)?;
         output_image.save(output_file)?;
     }
 
@@ -150,6 +152,7 @@ fn output_file(
     input: &str,
     extension: Option<&str>,
     k: u32,
+    color_space: &ColorSpace,
 ) -> Result<PathBuf> {
     if let Some(output) = output {
         Ok(Path::new(output).to_owned())
@@ -171,7 +174,10 @@ fn output_file(
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?;
         let millis = format!("{}{:03}", now.as_secs(), now.subsec_millis());
 
-        let filename = format!("{stem}-{millis}-{k}.{extension}");
+        let filename = format!(
+            "{stem}-{cs}-k{k}-{millis}.{extension}",
+            cs = color_space.name()
+        );
         let output_path = if let Some(parent) = parent {
             parent.join(filename)
         } else {

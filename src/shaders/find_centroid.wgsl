@@ -16,9 +16,6 @@ let max_f32: f32 = 1000.0;
 
 fn distance_not_sqrt(one: vec4<f32>, other: vec4<f32>) -> f32 {
     return distance(one.rgb, other.rgb);
-    // var length: vec4<f32> = one - other;
-
-    // return length.r * length.r + length.g * length.g + length.b * length.b;
 }
 
 [[stage(compute), workgroup_size(16, 16)]]
