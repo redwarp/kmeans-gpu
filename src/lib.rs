@@ -7,9 +7,9 @@ use wgpu::{
     Backends, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutEntry, BindingResource,
     BindingType, Buffer, BufferAddress, BufferBinding, BufferBindingType, BufferDescriptor,
     BufferUsages, ComputePipelineDescriptor, DeviceDescriptor, Features, ImageDataLayout, Instance,
-    PipelineLayoutDescriptor, PowerPreference, QueryType, RequestAdapterOptionsBase, ShaderSource,
-    ShaderStages, StorageTextureAccess, TextureDimension, TextureFormat, TextureUsages,
-    TextureViewDescriptor, TextureViewDimension,
+    MapMode, PipelineLayoutDescriptor, PowerPreference, QueryType, RequestAdapterOptionsBase,
+    ShaderSource, ShaderStages, StorageTextureAccess, TextureDimension, TextureFormat,
+    TextureUsages, TextureViewDescriptor, TextureViewDimension,
 };
 
 const WORKGROUP_SIZE: u32 = 256;
@@ -347,7 +347,14 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
     let convergence_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label: None,
         contents: bytemuck::cast_slice::<u32, u8>(&vec![0; k as usize + 1]),
-        usage: BufferUsages::STORAGE,
+        usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+    });
+
+    let check_convergence_buffer = device.create_buffer(&BufferDescriptor {
+        label: None,
+        size: (k + 1) as u64 * 4,
+        usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+        mapped_at_creation: false,
     });
 
     let choose_centroid_bind_group_1_layout =
@@ -567,21 +574,79 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         compute_pass.set_pipeline(&find_centroid_pipeline);
         compute_pass.set_bind_group(0, &find_centroid_bind_group, &[]);
         compute_pass.dispatch(dispatch_with, dispatch_height, 1);
+    }
 
-        for _ in 0..20 {
-            compute_pass.set_pipeline(&choose_centroid_pipeline);
-            compute_pass.set_bind_group(0, &choose_centroid_bind_group_0, &[]);
-            compute_pass.set_bind_group(1, &choose_centroid_bind_group_1, &[]);
-            for i in 0..k {
-                compute_pass.set_bind_group(2, &k_index_bind_groups[i as usize], &[]);
-                compute_pass.dispatch(choose_centroid_dispatch_width, 1, 1);
+    queue.submit(Some(encoder.finish()));
+
+    let step = (0.00006754 * k.pow(2) as f32 - 0.09901 * k as f32 + 31.57).max(1.0) as usize;
+
+    let max_iteration = 100;
+    let mut iteration = 0;
+    'outer: loop {
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+        {
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Choose centroid pass"),
+            });
+
+            for _ in 0..step {
+                compute_pass.set_pipeline(&choose_centroid_pipeline);
+                compute_pass.set_bind_group(0, &choose_centroid_bind_group_0, &[]);
+                compute_pass.set_bind_group(1, &choose_centroid_bind_group_1, &[]);
+                for i in 0..k {
+                    compute_pass.set_bind_group(2, &k_index_bind_groups[i as usize], &[]);
+                    compute_pass.dispatch(choose_centroid_dispatch_width, 1, 1);
+                }
+
+                compute_pass.set_pipeline(&find_centroid_pipeline);
+                compute_pass.set_bind_group(0, &find_centroid_bind_group, &[]);
+                compute_pass.dispatch(dispatch_with, dispatch_height, 1);
+
+                iteration += 1;
+                if iteration >= max_iteration {
+                    break 'outer;
+                }
             }
-
-            compute_pass.set_pipeline(&find_centroid_pipeline);
-            compute_pass.set_bind_group(0, &find_centroid_bind_group, &[]);
-            compute_pass.dispatch(dispatch_with, dispatch_height, 1);
         }
+        encoder.copy_buffer_to_buffer(
+            &convergence_buffer,
+            0,
+            &check_convergence_buffer,
+            0,
+            (k + 1) as u64 * 4,
+        );
 
+        queue.submit(Some(encoder.finish()));
+
+        let check_convergence_slice = check_convergence_buffer.slice(..);
+        let check_convergence_future = check_convergence_slice.map_async(MapMode::Read);
+
+        device.poll(wgpu::Maintain::Wait);
+
+        match check_convergence_future.block_on() {
+            Ok(_) => {
+                let convergence_data =
+                    bytemuck::cast_slice::<u8, u32>(&check_convergence_slice.get_mapped_range())
+                        .to_vec();
+                if convergence_data[k as usize] >= k {
+                    // We converged, time to go.
+                    break;
+                }
+            }
+            Err(_) => break 'outer,
+        };
+
+        check_convergence_buffer.unmap();
+    }
+
+    let mut encoder =
+        device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    {
+        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("Swap and fetch result pass"),
+        });
         compute_pass.set_pipeline(&swap_pipeline);
         compute_pass.set_bind_group(0, &swap_bind_group, &[]);
         compute_pass.dispatch(dispatch_with, dispatch_height, 1);
@@ -590,7 +655,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         encoder.write_timestamp(query_set, 1);
     }
 
-    let padded_bytes_per_row = padded_bytes_per_row(width);
+    let padded_bytes_per_row = padded_bytes_per_row(width as u64 * 16);
     let unpadded_bytes_per_row = width as usize * 16;
 
     let output_buffer_size =
@@ -636,13 +701,13 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
     queue.submit(Some(encoder.finish()));
 
     let buffer_slice = output_buffer.slice(..);
-    let buffer_future = buffer_slice.map_async(wgpu::MapMode::Read);
+    let buffer_future = buffer_slice.map_async(MapMode::Read);
 
     let cent_buffer_slice = staging_buffer.slice(..);
-    let cent_buffer_future = cent_buffer_slice.map_async(wgpu::MapMode::Read);
+    let cent_buffer_future = cent_buffer_slice.map_async(MapMode::Read);
 
     let query_slice = query_buf.slice(..);
-    let query_future = query_slice.map_async(wgpu::MapMode::Read);
+    let query_future = query_slice.map_async(MapMode::Read);
 
     device.poll(wgpu::Maintain::Wait);
 
@@ -671,7 +736,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         Ok(()) => {
             let padded_data = buffer_slice.get_mapped_range();
             let mut pixels: Vec<f32> = Vec::with_capacity(4 * width as usize * height as usize);
-            for padded in padded_data.chunks_exact(padded_bytes_per_row) {
+            for padded in padded_data.chunks_exact(padded_bytes_per_row as usize) {
                 pixels.extend_from_slice(bytemuck::cast_slice(&padded[..unpadded_bytes_per_row]));
             }
 
@@ -728,8 +793,7 @@ fn compute_work_group_count(
 }
 
 /// Compute the next multiple of 256 for texture retrieval padding.
-fn padded_bytes_per_row(width: u32) -> usize {
-    let bytes_per_row = width as usize * 16;
+fn padded_bytes_per_row(bytes_per_row: u64) -> u64 {
     let padding = (256 - bytes_per_row % 256) % 256;
     bytes_per_row + padding
 }
