@@ -106,12 +106,12 @@ fn main(
     workgroupBarrier();
     
     for (var i: u32 = 0u; i < 8u; i = i + 1u) {
-        workgroupBarrier();
         if (local_id.x >= (1u << i)) {
             local = local + scratch[local_id.x - (1u << i)];
         }
         workgroupBarrier();
         scratch[local_id.x] = local;
+        workgroupBarrier();
     }
     
     var exclusive_prefix = vec4<f32>(0.0);
@@ -165,21 +165,13 @@ fn main(
             shared_prefix = exclusive_prefix;
             
             atomicStorePrefixVec(workgroup_id.x * 8u + 0u, inclusive_prefix);
-        }
-        storageBarrier();
-        if (local_id.x == workgroup_size - 1u) {
             atomicStore(&flag_buffer.data[workgroup_id.x], FLAG_PREFIX_READY);
         }
-    }
-
-    var prefix = vec4<f32>(0.0);
-    workgroupBarrier();
-    if(workgroup_id.x != 0u){
-        prefix = shared_prefix;
+        storageBarrier();
     }
 
     if (workgroup_id.x == last_group_idx() & local_id.x == workgroup_size - 1u) {
-        let sum = prefix + scratch[local_id.x];
+        let sum = shared_prefix + local;
         if(sum.a > 0.0) {
             let new_centroid = vec4<f32>(sum.rgb / sum.a, 1.0);
             let previous_centroid = vec4<f32>(
