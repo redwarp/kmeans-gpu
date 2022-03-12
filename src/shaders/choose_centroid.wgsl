@@ -21,7 +21,7 @@ struct Settings {
 };
 
 [[group(0), binding(0)]] var<storage, read_write> centroids: Centroids;
-[[group(0), binding(1)]] var<storage, read> calculated: Indices;
+[[group(0), binding(1)]] var<storage, read> color_indices: Indices;
 [[group(0), binding(2)]] var pixels: texture_2d<f32>;
 [[group(1), binding(0)]] var<storage, read_write> prefix_buffer: AtomicBuffer;
 [[group(1), binding(1)]] var<storage, read_write> flag_buffer: AtomicBuffer;
@@ -54,7 +54,7 @@ fn in_bounds(global_x: u32, dimensions: vec2<i32>) -> bool {
 }
 
 fn match_centroid(k: u32, global_x: u32) -> bool {
-    return calculated.data[global_x] == k;
+    return color_indices.data[global_x] == k;
 }
 
 fn atomicStorePrefixVec(index: u32, value: vec4<f32>) {

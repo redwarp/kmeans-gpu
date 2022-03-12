@@ -9,7 +9,7 @@ struct Indices {
 
 [[group(0), binding(0)]] var pixels: texture_2d<f32>;
 [[group(0), binding(1)]] var<storage, read> centroids: Centroids;
-[[group(0), binding(2)]] var<storage, read_write> calculated: Indices;
+[[group(0), binding(2)]] var<storage, read_write> color_indices: Indices;
 
 let max_int : u32 = 4294967295u;
 let max_f32: f32 = 1000.0;
@@ -52,6 +52,6 @@ fn main(
     }
 
     let index: u32 = global_id.y * u32(dimensions.x) + global_id.x;
-    calculated.data[index] = found_index;
+    color_indices.data[index] = found_index;
     storageBarrier();
 }

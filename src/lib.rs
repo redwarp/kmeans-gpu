@@ -1,17 +1,22 @@
 use anyhow::Result;
+use modules::{ColorConverterModule, ColorReverterModule, Module, SwapModule};
 use palette::{IntoColor, Lab, Srgba};
 use pollster::FutureExt;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::{num::NonZeroU32, vec};
+use utils::compute_work_group_count;
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
-    Backends, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutEntry, BindingResource,
-    BindingType, Buffer, BufferAddress, BufferBinding, BufferBindingType, BufferDescriptor,
-    BufferUsages, ComputePipelineDescriptor, DeviceDescriptor, Features, ImageDataLayout, Instance,
-    MapMode, PipelineLayoutDescriptor, PowerPreference, QueryType, RequestAdapterOptionsBase,
-    ShaderSource, ShaderStages, StorageTextureAccess, TextureDimension, TextureFormat,
+    Backends, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry,
+    BindingResource, BindingType, Buffer, BufferAddress, BufferBinding, BufferBindingType,
+    BufferDescriptor, BufferUsages, ComputePipelineDescriptor, DeviceDescriptor, Features,
+    ImageDataLayout, Instance, MapMode, PipelineLayoutDescriptor, PowerPreference, QueryType,
+    RequestAdapterOptionsBase, ShaderSource, ShaderStages, TextureDimension, TextureFormat,
     TextureUsages, TextureViewDescriptor, TextureViewDimension,
 };
+
+mod modules;
+mod utils;
 
 const WORKGROUP_SIZE: u32 = 256;
 const N_SEQ: u32 = 24;
@@ -173,185 +178,19 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
     });
 
-    let index_size = width * height;
-    let calculated_buffer = device.create_buffer(&BufferDescriptor {
+    let color_index_size =
+        (width * height) as BufferAddress * std::mem::size_of::<u32>() as BufferAddress;
+    let color_index_buffer = device.create_buffer(&BufferDescriptor {
         label: None,
-        size: (index_size * 4) as BufferAddress,
+        size: color_index_size,
         usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     });
 
-    let convert_color_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
-        label: Some("Convert color shader"),
-        source: ShaderSource::Wgsl(
-            match color_space {
-                ColorSpace::Lab => include_str!("shaders/converters/rgb_to_lab.wgsl"),
-                ColorSpace::Rgb => include_str!("shaders/converters/rgb8u_to_rgb32f.wgsl"),
-            }
-            .into(),
-        ),
-    });
-
-    let convert_color_bind_group_layout =
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Convert color bind group layout"),
-            entries: &[
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
-                        format: TextureFormat::Rgba32Float,
-                        view_dimension: TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-    let convert_color_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-        label: Some("Convert color layout"),
-        bind_group_layouts: &[&convert_color_bind_group_layout],
-        push_constant_ranges: &[],
-    });
-
-    let convert_color_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-        label: Some("Convert color pipeline"),
-        layout: Some(&convert_color_pipeline_layout),
-        module: &convert_color_shader,
-        entry_point: "main",
-    });
-
-    let convert_color_bind_group = device.create_bind_group(&BindGroupDescriptor {
-        label: Some("Convert color bind group"),
-        layout: &convert_color_bind_group_layout,
-        entries: &[
-            BindGroupEntry {
-                binding: 0,
-                resource: BindingResource::TextureView(&input_texture.create_view(
-                    &TextureViewDescriptor {
-                        label: None,
-                        format: Some(TextureFormat::Rgba8Unorm),
-                        aspect: wgpu::TextureAspect::All,
-                        base_mip_level: 0,
-                        mip_level_count: NonZeroU32::new(1),
-                        dimension: Some(TextureViewDimension::D2),
-                        ..Default::default()
-                    },
-                )),
-            },
-            BindGroupEntry {
-                binding: 1,
-                resource: BindingResource::TextureView(&work_texture.create_view(
-                    &TextureViewDescriptor {
-                        label: None,
-                        format: Some(TextureFormat::Rgba32Float),
-                        aspect: wgpu::TextureAspect::All,
-                        base_mip_level: 0,
-                        mip_level_count: NonZeroU32::new(1),
-                        dimension: Some(TextureViewDimension::D2),
-                        ..Default::default()
-                    },
-                )),
-            },
-        ],
-    });
-
-    let revert_color_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
-        label: Some("Revert color shader"),
-        source: ShaderSource::Wgsl(
-            match color_space {
-                ColorSpace::Lab => include_str!("shaders/converters/lab_to_rgb.wgsl"),
-                ColorSpace::Rgb => include_str!("shaders/converters/rgb32f_to_rgb8u.wgsl"),
-            }
-            .into(),
-        ),
-    });
-
-    let revert_color_bind_group_layout =
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Revert color bind group layout"),
-            entries: &[
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
-                        format: TextureFormat::Rgba8Unorm,
-                        view_dimension: TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-    let revert_color_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-        label: Some("Revert color layout"),
-        bind_group_layouts: &[&revert_color_bind_group_layout],
-        push_constant_ranges: &[],
-    });
-
-    let revert_color_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-        label: Some("Revert color pipeline"),
-        layout: Some(&revert_color_pipeline_layout),
-        module: &revert_color_shader,
-        entry_point: "main",
-    });
-
-    let revert_color_bind_group = device.create_bind_group(&BindGroupDescriptor {
-        label: Some("Revert color bind group"),
-        layout: &revert_color_bind_group_layout,
-        entries: &[
-            BindGroupEntry {
-                binding: 0,
-                resource: BindingResource::TextureView(&work_texture.create_view(
-                    &TextureViewDescriptor {
-                        label: None,
-                        format: Some(TextureFormat::Rgba32Float),
-                        aspect: wgpu::TextureAspect::All,
-                        base_mip_level: 0,
-                        mip_level_count: NonZeroU32::new(1),
-                        dimension: Some(TextureViewDimension::D2),
-                        ..Default::default()
-                    },
-                )),
-            },
-            BindGroupEntry {
-                binding: 1,
-                resource: BindingResource::TextureView(&output_texture.create_view(
-                    &TextureViewDescriptor {
-                        label: None,
-                        format: Some(TextureFormat::Rgba8Unorm),
-                        aspect: wgpu::TextureAspect::All,
-                        base_mip_level: 0,
-                        mip_level_count: NonZeroU32::new(1),
-                        dimension: Some(TextureViewDimension::D2),
-                        ..Default::default()
-                    },
-                )),
-            },
-        ],
-    });
+    let color_converter_module =
+        ColorConverterModule::new(&device, color_space, image, &input_texture, &work_texture);
+    let color_reverter_module =
+        ColorReverterModule::new(&device, color_space, image, &work_texture, &output_texture);
 
     let find_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
         label: Some("Find centroid shader"),
@@ -359,7 +198,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
     });
 
     let find_centroid_bind_group_layout =
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("Find centroid bind group layout"),
             entries: &[
                 BindGroupLayoutEntry {
@@ -432,7 +271,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
             },
             BindGroupEntry {
                 binding: 2,
-                resource: calculated_buffer.as_entire_binding(),
+                resource: color_index_buffer.as_entire_binding(),
             },
         ],
     });
@@ -443,7 +282,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
     });
 
     let choose_centroid_bind_group_0_layout =
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("Choose centroid bind group 0 layout"),
             entries: &[
                 BindGroupLayoutEntry {
@@ -488,7 +327,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
             },
             BindGroupEntry {
                 binding: 1,
-                resource: calculated_buffer.as_entire_binding(),
+                resource: color_index_buffer.as_entire_binding(),
             },
             BindGroupEntry {
                 binding: 2,
@@ -541,7 +380,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
     });
 
     let choose_centroid_bind_group_1_layout =
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("Choose centroid bind group 1 layout"),
             entries: &[
                 BindGroupLayoutEntry {
@@ -619,20 +458,19 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         })
         .collect();
 
-    let k_index_bind_group_layout =
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Choose centroid bind group 2 layout"),
-            entries: &[BindGroupLayoutEntry {
-                binding: 0,
-                visibility: ShaderStages::COMPUTE,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
+    let k_index_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        label: Some("Choose centroid bind group 2 layout"),
+        entries: &[BindGroupLayoutEntry {
+            binding: 0,
+            visibility: ShaderStages::COMPUTE,
+            ty: BindingType::Buffer {
+                ty: BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }],
+    });
     let k_index_bind_groups: Vec<_> = (0..k)
         .map(|k| {
             device.create_bind_group(&BindGroupDescriptor {
@@ -667,80 +505,13 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         entry_point: "main",
     });
 
-    let swap_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
-        label: Some("Swap colors shader"),
-        source: ShaderSource::Wgsl(include_str!("shaders/swap.wgsl").into()),
-    });
-
-    let swap_bind_group_layout =
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Swap bind group layout"),
-            entries: &[
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
-                        format: TextureFormat::Rgba32Float,
-                        view_dimension: TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-    let swap_bind_group = device.create_bind_group(&BindGroupDescriptor {
-        label: None,
-        layout: &swap_bind_group_layout,
-        entries: &[
-            BindGroupEntry {
-                binding: 0,
-                resource: centroid_buffer.as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 1,
-                resource: calculated_buffer.as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 2,
-                resource: BindingResource::TextureView(
-                    &work_texture.create_view(&TextureViewDescriptor::default()),
-                ),
-            },
-        ],
-    });
-
-    let swap_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-        label: Some("Swap pipeline layout"),
-        bind_group_layouts: &[&swap_bind_group_layout],
-        push_constant_ranges: &[],
-    });
-    let swap_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-        label: Some("Swap pipeline"),
-        layout: Some(&swap_pipeline_layout),
-        module: &swap_shader,
-        entry_point: "main",
-    });
+    let swap_module = SwapModule::new(
+        &device,
+        image,
+        &work_texture,
+        &centroid_buffer,
+        &color_index_buffer,
+    );
 
     let mut encoder =
         device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -754,9 +525,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Kmean pass"),
         });
-        compute_pass.set_pipeline(&convert_color_pipeline);
-        compute_pass.set_bind_group(0, &convert_color_bind_group, &[]);
-        compute_pass.dispatch(dispatch_with, dispatch_height, 1);
+        color_converter_module.compute(&mut compute_pass);
 
         compute_pass.set_pipeline(&find_centroid_pipeline);
         compute_pass.set_bind_group(0, &find_centroid_bind_group, &[]);
@@ -834,13 +603,8 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Swap and fetch result pass"),
         });
-        compute_pass.set_pipeline(&swap_pipeline);
-        compute_pass.set_bind_group(0, &swap_bind_group, &[]);
-        compute_pass.dispatch(dispatch_with, dispatch_height, 1);
-
-        compute_pass.set_pipeline(&revert_color_pipeline);
-        compute_pass.set_bind_group(0, &revert_color_bind_group, &[]);
-        compute_pass.dispatch(dispatch_with, dispatch_height, 1);
+        swap_module.compute(&mut compute_pass);
+        color_reverter_module.compute(&mut compute_pass);
     }
     if let Some(query_set) = &query_set {
         encoder.write_timestamp(query_set, 1);
@@ -987,16 +751,6 @@ fn init_centroids(image: &Image, k: u32, color_space: &ColorSpace) -> Vec<u8> {
     ));
 
     centroids
-}
-
-fn compute_work_group_count(
-    (width, height): (u32, u32),
-    (workgroup_width, workgroup_height): (u32, u32),
-) -> (u32, u32) {
-    let x = (width + workgroup_width - 1) / workgroup_width;
-    let y = (height + workgroup_height - 1) / workgroup_height;
-
-    (x, y)
 }
 
 /// Compute the next multiple of 256 for texture retrieval padding.
