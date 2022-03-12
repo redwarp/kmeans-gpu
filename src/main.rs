@@ -1,4 +1,3 @@
-use palette::{IntoColor, Lab, Pixel, Srgb};
 use std::{
     borrow::Cow,
     path::{Path, PathBuf},
@@ -7,8 +6,8 @@ use std::{
 
 use anyhow::Result;
 use clap::{command, Arg};
-use image::{ImageBuffer, Rgb, Rgba};
-use k_means_gpu::{kmeans, ColorSpace, Image, ImageU8};
+use image::{ImageBuffer, Rgba};
+use k_means_gpu::{kmeans, ColorSpace, Image};
 
 fn main() -> Result<()> {
     let matches = command!()
@@ -71,54 +70,10 @@ fn main() -> Result<()> {
 
     let image = image::open(input)?.to_rgba8();
     let dimensions = image.dimensions();
-    let image = ImageU8::from_raw_pixels(dimensions, &image.into_raw());
-    // let pixels = match color_space {
-    //     ColorSpace::Lab => Srgb::from_raw_slice(&image.into_raw())
-    //         .into_iter()
-    //         .map(|rgb| {
-    //             let lab = IntoColor::<Lab>::into_color(rgb.into_format::<f32>());
-    //             [lab.l, lab.a, lab.b, 1.0]
-    //         })
-    //         .collect(),
-    //     ColorSpace::Rgb => image.into_raw()[..]
-    //         .chunks_exact(3)
-    //         .map(|rgb| {
-    //             [
-    //                 rgb[0] as f32 / 255.0,
-    //                 rgb[1] as f32 / 255.0,
-    //                 rgb[2] as f32 / 255.0,
-    //                 1.0,
-    //             ]
-    //         })
-    //         .collect::<Vec<[f32; 4]>>(),
-    // };
-
-    // let image = Image::new(dimensions, pixels);
+    let image = Image::from_raw_pixels(dimensions, &image.into_raw());
 
     let result = kmeans(k, &image, &color_space)?;
     let (width, height) = result.dimensions();
-    // let rgb: Vec<u8> = match color_space {
-    //     ColorSpace::Lab => result.into_raw_pixels()[..]
-    //         .chunks_exact(4)
-    //         .map(|lab| {
-    //             IntoColor::<Srgb>::into_color(Lab::new(lab[0], lab[1], lab[2]))
-    //                 .into_format()
-    //                 .into_raw::<[u8; 3]>()
-    //         })
-    //         .flatten()
-    //         .collect(),
-    //     ColorSpace::Rgb => result.into_raw_pixels()[..]
-    //         .chunks_exact(4)
-    //         .map(|rgba| {
-    //             [
-    //                 (rgba[0] * 255.0) as u8,
-    //                 (rgba[1] * 255.0) as u8,
-    //                 (rgba[2] * 255.0) as u8,
-    //             ]
-    //         })
-    //         .flatten()
-    //         .collect(),
-    // };
 
     if let Some(output_image) =
         ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, result.into_raw_pixels())

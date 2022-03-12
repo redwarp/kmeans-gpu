@@ -1,5 +1,5 @@
 use anyhow::Result;
-use palette::{IntoColor, Lab, Srgb, Srgba};
+use palette::{IntoColor, Lab, Srgba};
 use pollster::FutureExt;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::{num::NonZeroU32, vec};
@@ -16,12 +16,12 @@ use wgpu::{
 const WORKGROUP_SIZE: u32 = 256;
 const N_SEQ: u32 = 24;
 
-pub struct ImageU8 {
+pub struct Image {
     pub(crate) dimensions: (u32, u32),
     pub(crate) rgba: Vec<[u8; 4]>,
 }
 
-impl ImageU8 {
+impl Image {
     pub fn new(dimensions: (u32, u32), rgba: Vec<[u8; 4]>) -> Self {
         Self { dimensions, rgba }
     }
@@ -45,39 +45,6 @@ impl ImageU8 {
     }
 
     pub fn into_raw_pixels(self) -> Vec<u8> {
-        self.rgba.into_iter().flatten().collect()
-    }
-}
-
-pub struct Image {
-    pub(crate) dimensions: (u32, u32),
-    pub(crate) rgba: Vec<[f32; 4]>,
-}
-
-impl Image {
-    pub fn new(dimensions: (u32, u32), rgba: Vec<[f32; 4]>) -> Self {
-        Self { dimensions, rgba }
-    }
-
-    pub fn from_raw_pixels(dimensions: (u32, u32), rbga: &[f32]) -> Self {
-        let mut pixels = Vec::with_capacity(dimensions.0 as usize * dimensions.1 as usize);
-        pixels.extend_from_slice(bytemuck::cast_slice(rbga));
-        Self {
-            dimensions,
-            rgba: pixels,
-        }
-    }
-
-    pub fn get_pixel(&self, x: u32, y: u32) -> &[f32; 4] {
-        let index = (x + y * self.dimensions.0) as usize;
-        &self.rgba[index]
-    }
-
-    pub fn dimensions(&self) -> (u32, u32) {
-        self.dimensions
-    }
-
-    pub fn into_raw_pixels(self) -> Vec<f32> {
         self.rgba.into_iter().flatten().collect()
     }
 }
@@ -111,10 +78,10 @@ impl ColorSpace {
     }
 }
 
-pub fn kmeans(k: u32, image: &ImageU8, color_space: &ColorSpace) -> Result<ImageU8> {
+pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> {
     let (width, height) = image.dimensions;
 
-    let centroids = init_centroids(image, k);
+    let centroids = init_centroids(image, k, color_space);
 
     let instance = Instance::new(Backends::all());
     let adapter = instance
@@ -215,13 +182,19 @@ pub fn kmeans(k: u32, image: &ImageU8, color_space: &ColorSpace) -> Result<Image
     });
 
     let convert_color_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
-        label: Some("Revert color shader"),
-        source: ShaderSource::Wgsl(include_str!("shaders/rgb_to_lab.wgsl").into()),
+        label: Some("Convert color shader"),
+        source: ShaderSource::Wgsl(
+            match color_space {
+                ColorSpace::Lab => include_str!("shaders/converters/rgb_to_lab.wgsl"),
+                ColorSpace::Rgb => include_str!("shaders/converters/rgb8u_to_rgb32f.wgsl"),
+            }
+            .into(),
+        ),
     });
 
     let convert_color_bind_group_layout =
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Revert color bind group layout"),
+            label: Some("Convert color bind group layout"),
             entries: &[
                 BindGroupLayoutEntry {
                     binding: 0,
@@ -247,20 +220,20 @@ pub fn kmeans(k: u32, image: &ImageU8, color_space: &ColorSpace) -> Result<Image
         });
 
     let convert_color_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-        label: Some("Revert color layout"),
+        label: Some("Convert color layout"),
         bind_group_layouts: &[&convert_color_bind_group_layout],
         push_constant_ranges: &[],
     });
 
     let convert_color_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-        label: Some("Revert color pipeline"),
+        label: Some("Convert color pipeline"),
         layout: Some(&convert_color_pipeline_layout),
         module: &convert_color_shader,
         entry_point: "main",
     });
 
     let convert_color_bind_group = device.create_bind_group(&BindGroupDescriptor {
-        label: Some("Revert color bind group"),
+        label: Some("Convert color bind group"),
         layout: &convert_color_bind_group_layout,
         entries: &[
             BindGroupEntry {
@@ -296,7 +269,13 @@ pub fn kmeans(k: u32, image: &ImageU8, color_space: &ColorSpace) -> Result<Image
 
     let revert_color_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
         label: Some("Revert color shader"),
-        source: ShaderSource::Wgsl(include_str!("shaders/lab_to_rgb.wgsl").into()),
+        source: ShaderSource::Wgsl(
+            match color_space {
+                ColorSpace::Lab => include_str!("shaders/converters/lab_to_rgb.wgsl"),
+                ColorSpace::Rgb => include_str!("shaders/converters/rgb32f_to_rgb8u.wgsl"),
+            }
+            .into(),
+        ),
     });
 
     let revert_color_bind_group_layout =
@@ -955,7 +934,7 @@ pub fn kmeans(k: u32, image: &ImageU8, color_space: &ColorSpace) -> Result<Image
                 pixels.copy_from_slice(&padded[..unpadded_bytes_per_row]);
             }
 
-            let result = ImageU8::from_raw_pixels((width, height), &pixels);
+            let result = Image::from_raw_pixels((width, height), &pixels);
 
             Ok(result)
         }
@@ -963,7 +942,7 @@ pub fn kmeans(k: u32, image: &ImageU8, color_space: &ColorSpace) -> Result<Image
     }
 }
 
-fn init_centroids(image: &ImageU8, k: u32) -> Vec<u8> {
+fn init_centroids(image: &Image, k: u32, color_space: &ColorSpace) -> Vec<u8> {
     let mut centroids: Vec<u8> = vec![];
     centroids.extend_from_slice(bytemuck::cast_slice(&[k]));
 
@@ -990,10 +969,19 @@ fn init_centroids(image: &ImageU8, k: u32) -> Vec<u8> {
                 let x = color_index % width;
                 let y = color_index / width;
                 let pixel = image.get_pixel(x, y);
-                let lab: Lab = Srgba::new(pixel[0], pixel[1], pixel[2], pixel[3])
-                    .into_format::<_, f32>()
-                    .into_color();
-                [lab.l, lab.a, lab.b, 1.0]
+                match color_space {
+                    ColorSpace::Lab => {
+                        let lab: Lab = Srgba::new(pixel[0], pixel[1], pixel[2], pixel[3])
+                            .into_format::<_, f32>()
+                            .into_color();
+                        [lab.l, lab.a, lab.b, 1.0]
+                    }
+                    ColorSpace::Rgb => pixel.map(|component| component as f32 / 255.0),
+                }
+                // let lab: Lab = Srgba::new(pixel[0], pixel[1], pixel[2], pixel[3])
+                //     .into_format::<_, f32>()
+                //     .into_color();
+                // [lab.l, lab.a, lab.b, 1.0]
             })
             .collect::<Vec<f32>>(),
     ));

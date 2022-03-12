@@ -20,7 +20,7 @@ As this loads an image as a texture to your graphic cards, it also comes with so
 cargo run --release -- -i .\gfx\tokyo.jpg -k 4
 ```
 
-![Tokyo with k=4](gfx/tokyo-k4.png)
+![Tokyo with k=4](gfx/tokyo-lab-k4.png)
 
 ## Sources
 
