@@ -17,10 +17,10 @@ As this loads an image as a texture to your graphic cards, it also comes with so
 ![Tokyo](gfx/tokyo.jpg)
 
 ```rust
-cargo run --release -- -i .\gfx\tokyo.jpg -k 4
+cargo run --release -- -i .\gfx\tokyo.jpg -k 6
 ```
 
-![Tokyo with k=4](gfx/tokyo-lab-k4.png)
+![Tokyo with k=4](gfx/tokyo-lab-k6.png)
 
 ## Sources
 
