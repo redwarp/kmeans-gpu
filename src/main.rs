@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::Result;
 use clap::{command, Arg};
-use image::{ImageBuffer, Rgb};
+use image::{ImageBuffer, Rgb, Rgba};
 use k_means_gpu::{kmeans, ColorSpace, Image, ImageU8};
 
 fn main() -> Result<()> {
@@ -97,30 +97,32 @@ fn main() -> Result<()> {
 
     let result = kmeans(k, &image, &color_space)?;
     let (width, height) = result.dimensions();
-    let rgb: Vec<u8> = match color_space {
-        ColorSpace::Lab => result.into_raw_pixels()[..]
-            .chunks_exact(4)
-            .map(|lab| {
-                IntoColor::<Srgb>::into_color(Lab::new(lab[0], lab[1], lab[2]))
-                    .into_format()
-                    .into_raw::<[u8; 3]>()
-            })
-            .flatten()
-            .collect(),
-        ColorSpace::Rgb => result.into_raw_pixels()[..]
-            .chunks_exact(4)
-            .map(|rgba| {
-                [
-                    (rgba[0] * 255.0) as u8,
-                    (rgba[1] * 255.0) as u8,
-                    (rgba[2] * 255.0) as u8,
-                ]
-            })
-            .flatten()
-            .collect(),
-    };
+    // let rgb: Vec<u8> = match color_space {
+    //     ColorSpace::Lab => result.into_raw_pixels()[..]
+    //         .chunks_exact(4)
+    //         .map(|lab| {
+    //             IntoColor::<Srgb>::into_color(Lab::new(lab[0], lab[1], lab[2]))
+    //                 .into_format()
+    //                 .into_raw::<[u8; 3]>()
+    //         })
+    //         .flatten()
+    //         .collect(),
+    //     ColorSpace::Rgb => result.into_raw_pixels()[..]
+    //         .chunks_exact(4)
+    //         .map(|rgba| {
+    //             [
+    //                 (rgba[0] * 255.0) as u8,
+    //                 (rgba[1] * 255.0) as u8,
+    //                 (rgba[2] * 255.0) as u8,
+    //             ]
+    //         })
+    //         .flatten()
+    //         .collect(),
+    // };
 
-    if let Some(output_image) = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, rgb) {
+    if let Some(output_image) =
+        ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, result.into_raw_pixels())
+    {
         let output_file = output_file(None, input, extension, k, &color_space)?;
         output_image.save(output_file)?;
     }

@@ -111,7 +111,7 @@ impl ColorSpace {
     }
 }
 
-pub fn kmeans(k: u32, image: &ImageU8, color_space: &ColorSpace) -> Result<Image> {
+pub fn kmeans(k: u32, image: &ImageU8, color_space: &ColorSpace) -> Result<ImageU8> {
     let (width, height) = image.dimensions;
 
     let centroids = init_centroids(image, k);
@@ -196,7 +196,7 @@ pub fn kmeans(k: u32, image: &ImageU8, color_space: &ColorSpace) -> Result<Image
         mip_level_count: 1,
         sample_count: 1,
         dimension: TextureDimension::D2,
-        format: TextureFormat::Rgba32Float,
+        format: TextureFormat::Rgba8Unorm,
         usage: TextureUsages::COPY_SRC | TextureUsages::STORAGE_BINDING,
     });
 
@@ -215,13 +215,13 @@ pub fn kmeans(k: u32, image: &ImageU8, color_space: &ColorSpace) -> Result<Image
     });
 
     let convert_color_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
-        label: Some("Convert color shader"),
+        label: Some("Revert color shader"),
         source: ShaderSource::Wgsl(include_str!("shaders/rgb_to_lab.wgsl").into()),
     });
 
     let convert_color_bind_group_layout =
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Convert color bind group layout"),
+            label: Some("Revert color bind group layout"),
             entries: &[
                 BindGroupLayoutEntry {
                     binding: 0,
@@ -247,20 +247,20 @@ pub fn kmeans(k: u32, image: &ImageU8, color_space: &ColorSpace) -> Result<Image
         });
 
     let convert_color_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-        label: Some("Convert color layout"),
+        label: Some("Revert color layout"),
         bind_group_layouts: &[&convert_color_bind_group_layout],
         push_constant_ranges: &[],
     });
 
     let convert_color_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-        label: Some("Convert color pipeline"),
+        label: Some("Revert color pipeline"),
         layout: Some(&convert_color_pipeline_layout),
         module: &convert_color_shader,
         entry_point: "main",
     });
 
     let convert_color_bind_group = device.create_bind_group(&BindGroupDescriptor {
-        label: Some("Convert color bind group"),
+        label: Some("Revert color bind group"),
         layout: &convert_color_bind_group_layout,
         entries: &[
             BindGroupEntry {
@@ -283,6 +283,86 @@ pub fn kmeans(k: u32, image: &ImageU8, color_space: &ColorSpace) -> Result<Image
                     &TextureViewDescriptor {
                         label: None,
                         format: Some(TextureFormat::Rgba32Float),
+                        aspect: wgpu::TextureAspect::All,
+                        base_mip_level: 0,
+                        mip_level_count: NonZeroU32::new(1),
+                        dimension: Some(TextureViewDimension::D2),
+                        ..Default::default()
+                    },
+                )),
+            },
+        ],
+    });
+
+    let revert_color_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+        label: Some("Revert color shader"),
+        source: ShaderSource::Wgsl(include_str!("shaders/lab_to_rgb.wgsl").into()),
+    });
+
+    let revert_color_bind_group_layout =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Revert color bind group layout"),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::StorageTexture {
+                        access: StorageTextureAccess::WriteOnly,
+                        format: TextureFormat::Rgba8Unorm,
+                        view_dimension: TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+    let revert_color_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+        label: Some("Revert color layout"),
+        bind_group_layouts: &[&revert_color_bind_group_layout],
+        push_constant_ranges: &[],
+    });
+
+    let revert_color_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+        label: Some("Revert color pipeline"),
+        layout: Some(&revert_color_pipeline_layout),
+        module: &revert_color_shader,
+        entry_point: "main",
+    });
+
+    let revert_color_bind_group = device.create_bind_group(&BindGroupDescriptor {
+        label: Some("Revert color bind group"),
+        layout: &revert_color_bind_group_layout,
+        entries: &[
+            BindGroupEntry {
+                binding: 0,
+                resource: BindingResource::TextureView(&work_texture.create_view(
+                    &TextureViewDescriptor {
+                        label: None,
+                        format: Some(TextureFormat::Rgba32Float),
+                        aspect: wgpu::TextureAspect::All,
+                        base_mip_level: 0,
+                        mip_level_count: NonZeroU32::new(1),
+                        dimension: Some(TextureViewDimension::D2),
+                        ..Default::default()
+                    },
+                )),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: BindingResource::TextureView(&output_texture.create_view(
+                    &TextureViewDescriptor {
+                        label: None,
+                        format: Some(TextureFormat::Rgba8Unorm),
                         aspect: wgpu::TextureAspect::All,
                         base_mip_level: 0,
                         mip_level_count: NonZeroU32::new(1),
@@ -665,7 +745,7 @@ pub fn kmeans(k: u32, image: &ImageU8, color_space: &ColorSpace) -> Result<Image
             BindGroupEntry {
                 binding: 2,
                 resource: BindingResource::TextureView(
-                    &output_texture.create_view(&TextureViewDescriptor::default()),
+                    &work_texture.create_view(&TextureViewDescriptor::default()),
                 ),
             },
         ],
@@ -778,13 +858,17 @@ pub fn kmeans(k: u32, image: &ImageU8, color_space: &ColorSpace) -> Result<Image
         compute_pass.set_pipeline(&swap_pipeline);
         compute_pass.set_bind_group(0, &swap_bind_group, &[]);
         compute_pass.dispatch(dispatch_with, dispatch_height, 1);
+
+        compute_pass.set_pipeline(&revert_color_pipeline);
+        compute_pass.set_bind_group(0, &revert_color_bind_group, &[]);
+        compute_pass.dispatch(dispatch_with, dispatch_height, 1);
     }
     if let Some(query_set) = &query_set {
         encoder.write_timestamp(query_set, 1);
     }
 
-    let padded_bytes_per_row = padded_bytes_per_row(width as u64 * 16);
-    let unpadded_bytes_per_row = width as usize * 16;
+    let padded_bytes_per_row = padded_bytes_per_row(width as u64 * 4);
+    let unpadded_bytes_per_row = width as usize * 4;
 
     let output_buffer_size =
         padded_bytes_per_row as u64 * height as u64 * std::mem::size_of::<u8>() as u64;
@@ -863,12 +947,15 @@ pub fn kmeans(k: u32, image: &ImageU8, color_space: &ColorSpace) -> Result<Image
     match buffer_future.block_on() {
         Ok(()) => {
             let padded_data = buffer_slice.get_mapped_range();
-            let mut pixels: Vec<f32> = Vec::with_capacity(4 * width as usize * height as usize);
-            for padded in padded_data.chunks_exact(padded_bytes_per_row as usize) {
-                pixels.extend_from_slice(bytemuck::cast_slice(&padded[..unpadded_bytes_per_row]));
+            let mut pixels: Vec<u8> = vec![0; unpadded_bytes_per_row * height as usize];
+            for (padded, pixels) in padded_data
+                .chunks_exact(padded_bytes_per_row as usize)
+                .zip(pixels.chunks_exact_mut(unpadded_bytes_per_row))
+            {
+                pixels.copy_from_slice(&padded[..unpadded_bytes_per_row]);
             }
 
-            let result = Image::from_raw_pixels((width, height), &pixels);
+            let result = ImageU8::from_raw_pixels((width, height), &pixels);
 
             Ok(result)
         }
