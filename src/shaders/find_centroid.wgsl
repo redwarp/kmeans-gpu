@@ -43,9 +43,8 @@ fn main(
         );
 
         let distance: f32 = distance_not_sqrt(pixel, centroid_components);
-        let smaller = bool(distance < min_distance);
 
-        if (smaller) {            
+        if (distance < min_distance) {            
             min_distance = distance;
             found_index = index;
         }
