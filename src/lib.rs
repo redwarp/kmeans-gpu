@@ -1,4 +1,5 @@
 use anyhow::Result;
+use palette::{IntoColor, Lab, Srgb, Srgba};
 use pollster::FutureExt;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::{num::NonZeroU32, vec};
@@ -14,6 +15,39 @@ use wgpu::{
 
 const WORKGROUP_SIZE: u32 = 256;
 const N_SEQ: u32 = 24;
+
+pub struct ImageU8 {
+    pub(crate) dimensions: (u32, u32),
+    pub(crate) rgba: Vec<[u8; 4]>,
+}
+
+impl ImageU8 {
+    pub fn new(dimensions: (u32, u32), rgba: Vec<[u8; 4]>) -> Self {
+        Self { dimensions, rgba }
+    }
+
+    pub fn from_raw_pixels(dimensions: (u32, u32), rbga: &[u8]) -> Self {
+        let mut pixels = Vec::with_capacity(dimensions.0 as usize * dimensions.1 as usize);
+        pixels.extend_from_slice(bytemuck::cast_slice(rbga));
+        Self {
+            dimensions,
+            rgba: pixels,
+        }
+    }
+
+    pub fn get_pixel(&self, x: u32, y: u32) -> &[u8; 4] {
+        let index = (x + y * self.dimensions.0) as usize;
+        &self.rgba[index]
+    }
+
+    pub fn dimensions(&self) -> (u32, u32) {
+        self.dimensions
+    }
+
+    pub fn into_raw_pixels(self) -> Vec<u8> {
+        self.rgba.into_iter().flatten().collect()
+    }
+}
 
 pub struct Image {
     pub(crate) dimensions: (u32, u32),
@@ -77,7 +111,7 @@ impl ColorSpace {
     }
 }
 
-pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> {
+pub fn kmeans(k: u32, image: &ImageU8, color_space: &ColorSpace) -> Result<Image> {
     let (width, height) = image.dimensions;
 
     let centroids = init_centroids(image, k);
@@ -131,7 +165,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         mip_level_count: 1,
         sample_count: 1,
         dimension: TextureDimension::D2,
-        format: TextureFormat::Rgba32Float,
+        format: TextureFormat::Rgba8Unorm,
         usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
     });
 
@@ -140,11 +174,21 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         bytemuck::cast_slice(&image.rgba),
         ImageDataLayout {
             offset: 0,
-            bytes_per_row: std::num::NonZeroU32::new(16 * width),
+            bytes_per_row: std::num::NonZeroU32::new(4 * width),
             rows_per_image: None,
         },
         texture_size,
     );
+
+    let work_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("work texture"),
+        size: texture_size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: TextureFormat::Rgba32Float,
+        usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+    });
 
     let output_texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("output texture"),
@@ -168,6 +212,86 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         size: (index_size * 4) as BufferAddress,
         usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
         mapped_at_creation: false,
+    });
+
+    let convert_color_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+        label: Some("Convert color shader"),
+        source: ShaderSource::Wgsl(include_str!("shaders/rgb_to_lab.wgsl").into()),
+    });
+
+    let convert_color_bind_group_layout =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Convert color bind group layout"),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::StorageTexture {
+                        access: StorageTextureAccess::WriteOnly,
+                        format: TextureFormat::Rgba32Float,
+                        view_dimension: TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+    let convert_color_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+        label: Some("Convert color layout"),
+        bind_group_layouts: &[&convert_color_bind_group_layout],
+        push_constant_ranges: &[],
+    });
+
+    let convert_color_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+        label: Some("Convert color pipeline"),
+        layout: Some(&convert_color_pipeline_layout),
+        module: &convert_color_shader,
+        entry_point: "main",
+    });
+
+    let convert_color_bind_group = device.create_bind_group(&BindGroupDescriptor {
+        label: Some("Convert color bind group"),
+        layout: &convert_color_bind_group_layout,
+        entries: &[
+            BindGroupEntry {
+                binding: 0,
+                resource: BindingResource::TextureView(&input_texture.create_view(
+                    &TextureViewDescriptor {
+                        label: None,
+                        format: Some(TextureFormat::Rgba8Unorm),
+                        aspect: wgpu::TextureAspect::All,
+                        base_mip_level: 0,
+                        mip_level_count: NonZeroU32::new(1),
+                        dimension: Some(TextureViewDimension::D2),
+                        ..Default::default()
+                    },
+                )),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: BindingResource::TextureView(&work_texture.create_view(
+                    &TextureViewDescriptor {
+                        label: None,
+                        format: Some(TextureFormat::Rgba32Float),
+                        aspect: wgpu::TextureAspect::All,
+                        base_mip_level: 0,
+                        mip_level_count: NonZeroU32::new(1),
+                        dimension: Some(TextureViewDimension::D2),
+                        ..Default::default()
+                    },
+                )),
+            },
+        ],
     });
 
     let find_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
@@ -231,7 +355,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         entries: &[
             BindGroupEntry {
                 binding: 0,
-                resource: BindingResource::TextureView(&input_texture.create_view(
+                resource: BindingResource::TextureView(&work_texture.create_view(
                     &TextureViewDescriptor {
                         label: None,
                         format: Some(TextureFormat::Rgba32Float),
@@ -310,7 +434,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
             BindGroupEntry {
                 binding: 2,
                 resource: BindingResource::TextureView(
-                    &input_texture.create_view(&TextureViewDescriptor::default()),
+                    &work_texture.create_view(&TextureViewDescriptor::default()),
                 ),
             },
         ],
@@ -571,6 +695,10 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Kmean pass"),
         });
+        compute_pass.set_pipeline(&convert_color_pipeline);
+        compute_pass.set_bind_group(0, &convert_color_bind_group, &[]);
+        compute_pass.dispatch(dispatch_with, dispatch_height, 1);
+
         compute_pass.set_pipeline(&find_centroid_pipeline);
         compute_pass.set_bind_group(0, &find_centroid_bind_group, &[]);
         compute_pass.dispatch(dispatch_with, dispatch_height, 1);
@@ -748,7 +876,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
     }
 }
 
-fn init_centroids(image: &Image, k: u32) -> Vec<u8> {
+fn init_centroids(image: &ImageU8, k: u32) -> Vec<u8> {
     let mut centroids: Vec<u8> = vec![];
     centroids.extend_from_slice(bytemuck::cast_slice(&[k]));
 
@@ -774,7 +902,11 @@ fn init_centroids(image: &Image, k: u32) -> Vec<u8> {
             .flat_map(|color_index| {
                 let x = color_index % width;
                 let y = color_index / width;
-                image.get_pixel(x, y).clone()
+                let pixel = image.get_pixel(x, y);
+                let lab: Lab = Srgba::new(pixel[0], pixel[1], pixel[2], pixel[3])
+                    .into_format::<_, f32>()
+                    .into_color();
+                [lab.l, lab.a, lab.b, 1.0]
             })
             .collect::<Vec<f32>>(),
     ));

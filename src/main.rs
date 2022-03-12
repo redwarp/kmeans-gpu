@@ -8,7 +8,7 @@ use std::{
 use anyhow::Result;
 use clap::{command, Arg};
 use image::{ImageBuffer, Rgb};
-use k_means_gpu::{kmeans, ColorSpace, Image};
+use k_means_gpu::{kmeans, ColorSpace, Image, ImageU8};
 
 fn main() -> Result<()> {
     let matches = command!()
@@ -69,30 +69,31 @@ fn main() -> Result<()> {
     let color_space = ColorSpace::from(matches.value_of("colorspace").expect("Default value"))
         .expect("Values restricted to supported ones");
 
-    let image = image::open(input)?.to_rgb8();
+    let image = image::open(input)?.to_rgba8();
     let dimensions = image.dimensions();
-    let pixels = match color_space {
-        ColorSpace::Lab => Srgb::from_raw_slice(&image.into_raw())
-            .into_iter()
-            .map(|rgb| {
-                let lab = IntoColor::<Lab>::into_color(rgb.into_format::<f32>());
-                [lab.l, lab.a, lab.b, 1.0]
-            })
-            .collect(),
-        ColorSpace::Rgb => image.into_raw()[..]
-            .chunks_exact(3)
-            .map(|rgb| {
-                [
-                    rgb[0] as f32 / 255.0,
-                    rgb[1] as f32 / 255.0,
-                    rgb[2] as f32 / 255.0,
-                    1.0,
-                ]
-            })
-            .collect::<Vec<[f32; 4]>>(),
-    };
+    let image = ImageU8::from_raw_pixels(dimensions, &image.into_raw());
+    // let pixels = match color_space {
+    //     ColorSpace::Lab => Srgb::from_raw_slice(&image.into_raw())
+    //         .into_iter()
+    //         .map(|rgb| {
+    //             let lab = IntoColor::<Lab>::into_color(rgb.into_format::<f32>());
+    //             [lab.l, lab.a, lab.b, 1.0]
+    //         })
+    //         .collect(),
+    //     ColorSpace::Rgb => image.into_raw()[..]
+    //         .chunks_exact(3)
+    //         .map(|rgb| {
+    //             [
+    //                 rgb[0] as f32 / 255.0,
+    //                 rgb[1] as f32 / 255.0,
+    //                 rgb[2] as f32 / 255.0,
+    //                 1.0,
+    //             ]
+    //         })
+    //         .collect::<Vec<[f32; 4]>>(),
+    // };
 
-    let image = Image::new(dimensions, pixels);
+    // let image = Image::new(dimensions, pixels);
 
     let result = kmeans(k, &image, &color_space)?;
     let (width, height) = result.dimensions();
