@@ -34,3 +34,7 @@ I had to read a bunch of stuff to even start to make sense of it all.
   + https://en.wikipedia.org/wiki/Prefix_sum
   + Prefix sum in wgsl: https://github.com/googlefonts/compute-shader-101/blob/prefix/compute-shader-hello/src/shader.wgsl
   + https://github.com/linebender/piet-gpu/blob/prefix/piet-gpu-hal/examples/shader/prefix.comp
+
+## License
+
+MIT
