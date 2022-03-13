@@ -14,10 +14,6 @@ struct Indices {
 let max_int : u32 = 4294967295u;
 let max_f32: f32 = 1000.0;
 
-fn distance_not_sqrt(one: vec4<f32>, other: vec4<f32>) -> f32 {
-    return distance(one.rgb, other.rgb);
-}
-
 [[stage(compute), workgroup_size(16, 16)]]
 fn main(
     [[builtin(global_invocation_id)]] global_id : vec3<u32>,
@@ -42,7 +38,7 @@ fn main(
             centroids.data[index * 4u + 3u],
         );
 
-        let distance: f32 = distance_not_sqrt(pixel, centroid_components);
+        let distance: f32 = distance(pixel.rgb, centroid_components.rgb);
 
         if (distance < min_distance) {            
             min_distance = distance;
