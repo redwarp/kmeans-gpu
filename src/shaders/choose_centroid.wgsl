@@ -125,11 +125,12 @@ fn main(
             flag = FLAG_PREFIX_READY;
         }
     }
-
     storageBarrier();
+
     if (local_id.x == workgroup_size - 1u) {
         atomicStore(&flag_buffer.data[workgroup_id.x], flag);
-    }
+    }    
+    storageBarrier();
 
     if(workgroup_id.x != 0u) {
         // decoupled loop-back
@@ -167,6 +168,7 @@ fn main(
             atomicStorePrefixVec(workgroup_id.x * 8u + 0u, inclusive_prefix);
             atomicStore(&flag_buffer.data[workgroup_id.x], FLAG_PREFIX_READY);
         }
+        workgroupBarrier();
         storageBarrier();
     }
 

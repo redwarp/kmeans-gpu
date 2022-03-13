@@ -11,7 +11,7 @@ use wgpu::{
 use crate::{utils::compute_work_group_count, ColorSpace, Image};
 
 pub(crate) trait Module {
-    fn compute<'a>(&'a self, compute_pass: &mut ComputePass<'a>);
+    fn dispatch<'a>(&'a self, compute_pass: &mut ComputePass<'a>);
 }
 
 pub(crate) struct ColorConverterModule {
@@ -126,7 +126,7 @@ impl ColorConverterModule {
 }
 
 impl Module for ColorConverterModule {
-    fn compute<'a>(&'a self, compute_pass: &mut ComputePass<'a>) {
+    fn dispatch<'a>(&'a self, compute_pass: &mut ComputePass<'a>) {
         compute_pass.set_pipeline(&self.pipeline);
         compute_pass.set_bind_group(0, &self.bind_group, &[]);
         compute_pass.dispatch(self.dispatch_size.0, self.dispatch_size.1, 1);
@@ -245,7 +245,7 @@ impl ColorReverterModule {
 }
 
 impl Module for ColorReverterModule {
-    fn compute<'a>(&'a self, compute_pass: &mut ComputePass<'a>) {
+    fn dispatch<'a>(&'a self, compute_pass: &mut ComputePass<'a>) {
         compute_pass.set_pipeline(&self.pipeline);
         compute_pass.set_bind_group(0, &self.bind_group, &[]);
         compute_pass.dispatch(self.dispatch_size.0, self.dispatch_size.1, 1);
@@ -351,7 +351,124 @@ impl SwapModule {
 }
 
 impl Module for SwapModule {
-    fn compute<'a>(&'a self, compute_pass: &mut ComputePass<'a>) {
+    fn dispatch<'a>(&'a self, compute_pass: &mut ComputePass<'a>) {
+        compute_pass.set_pipeline(&self.pipeline);
+        compute_pass.set_bind_group(0, &self.bind_group, &[]);
+        compute_pass.dispatch(self.dispatch_size.0, self.dispatch_size.1, 1);
+    }
+}
+
+pub(crate) struct FindCentroidModule {
+    pipeline: ComputePipeline,
+    bind_group: BindGroup,
+    dispatch_size: (u32, u32),
+}
+
+impl FindCentroidModule {
+    pub fn new(
+        device: &Device,
+        image: &Image,
+        work_texture: &Texture,
+        centroid_buffer: &Buffer,
+        color_index_buffer: &Buffer,
+    ) -> Self {
+        let find_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+            label: Some("Find centroid shader"),
+            source: ShaderSource::Wgsl(include_str!("shaders/find_centroid.wgsl").into()),
+        });
+
+        let find_centroid_bind_group_layout =
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("Find centroid bind group layout"),
+                entries: &[
+                    BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let find_centroid_pipeline_layout =
+            device.create_pipeline_layout(&PipelineLayoutDescriptor {
+                label: Some("Pipeline layout"),
+                bind_group_layouts: &[&find_centroid_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let find_centroid_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("Find centroid pipeline"),
+            layout: Some(&find_centroid_pipeline_layout),
+            module: &find_centroid_shader,
+            entry_point: "main",
+        });
+
+        let find_centroid_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Find centroid bind group"),
+            layout: &find_centroid_bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(&work_texture.create_view(
+                        &TextureViewDescriptor {
+                            label: None,
+                            format: Some(TextureFormat::Rgba32Float),
+                            aspect: wgpu::TextureAspect::All,
+                            base_mip_level: 0,
+                            mip_level_count: NonZeroU32::new(1),
+                            dimension: Some(TextureViewDimension::D2),
+                            ..Default::default()
+                        },
+                    )),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: centroid_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: color_index_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let dispatch_size = compute_work_group_count(image.dimensions, (16, 16));
+
+        Self {
+            pipeline: find_centroid_pipeline,
+            bind_group: find_centroid_bind_group,
+            dispatch_size,
+        }
+    }
+}
+
+impl Module for FindCentroidModule {
+    fn dispatch<'a>(&'a self, compute_pass: &mut ComputePass<'a>) {
         compute_pass.set_pipeline(&self.pipeline);
         compute_pass.set_bind_group(0, &self.bind_group, &[]);
         compute_pass.dispatch(self.dispatch_size.0, self.dispatch_size.1, 1);

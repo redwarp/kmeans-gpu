@@ -1,10 +1,10 @@
 use anyhow::Result;
-use modules::{ColorConverterModule, ColorReverterModule, Module, SwapModule};
+use modules::{ColorConverterModule, ColorReverterModule, FindCentroidModule, Module, SwapModule};
 use palette::{IntoColor, Lab, Srgba};
 use pollster::FutureExt;
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use std::{num::NonZeroU32, vec};
-use utils::compute_work_group_count;
+use std::vec;
+use utils::{compute_work_group_count, padded_bytes_per_row};
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
     Backends, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry,
@@ -12,7 +12,7 @@ use wgpu::{
     BufferDescriptor, BufferUsages, ComputePipelineDescriptor, DeviceDescriptor, Features,
     ImageDataLayout, Instance, MapMode, PipelineLayoutDescriptor, PowerPreference, QueryType,
     RequestAdapterOptionsBase, ShaderSource, ShaderStages, TextureDimension, TextureFormat,
-    TextureUsages, TextureViewDescriptor, TextureViewDimension,
+    TextureUsages, TextureViewDescriptor,
 };
 
 mod modules;
@@ -191,90 +191,13 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         ColorConverterModule::new(&device, color_space, image, &input_texture, &work_texture);
     let color_reverter_module =
         ColorReverterModule::new(&device, color_space, image, &work_texture, &output_texture);
-
-    let find_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
-        label: Some("Find centroid shader"),
-        source: ShaderSource::Wgsl(include_str!("shaders/find_centroid.wgsl").into()),
-    });
-
-    let find_centroid_bind_group_layout =
-        device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("Find centroid bind group layout"),
-            entries: &[
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-    let find_centroid_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-        label: Some("Pipeline layout"),
-        bind_group_layouts: &[&find_centroid_bind_group_layout],
-        push_constant_ranges: &[],
-    });
-
-    let find_centroid_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-        label: Some("Find centroid pipeline"),
-        layout: Some(&find_centroid_pipeline_layout),
-        module: &find_centroid_shader,
-        entry_point: "main",
-    });
-
-    let find_centroid_bind_group = device.create_bind_group(&BindGroupDescriptor {
-        label: Some("Find centroid bind group"),
-        layout: &find_centroid_bind_group_layout,
-        entries: &[
-            BindGroupEntry {
-                binding: 0,
-                resource: BindingResource::TextureView(&work_texture.create_view(
-                    &TextureViewDescriptor {
-                        label: None,
-                        format: Some(TextureFormat::Rgba32Float),
-                        aspect: wgpu::TextureAspect::All,
-                        base_mip_level: 0,
-                        mip_level_count: NonZeroU32::new(1),
-                        dimension: Some(TextureViewDimension::D2),
-                        ..Default::default()
-                    },
-                )),
-            },
-            BindGroupEntry {
-                binding: 1,
-                resource: centroid_buffer.as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 2,
-                resource: color_index_buffer.as_entire_binding(),
-            },
-        ],
-    });
+    let find_centroid_module = FindCentroidModule::new(
+        &device,
+        image,
+        &work_texture,
+        &centroid_buffer,
+        &color_index_buffer,
+    );
 
     let choose_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
         label: Some("Choose centroid shader"),
@@ -519,22 +442,20 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         encoder.write_timestamp(query_set, 0);
     }
 
-    let (dispatch_with, dispatch_height) =
-        compute_work_group_count((texture_size.width, texture_size.height), (16, 16));
     {
         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Kmean pass"),
         });
-        color_converter_module.compute(&mut compute_pass);
+        color_converter_module.dispatch(&mut compute_pass);
 
-        compute_pass.set_pipeline(&find_centroid_pipeline);
-        compute_pass.set_bind_group(0, &find_centroid_bind_group, &[]);
-        compute_pass.dispatch(dispatch_with, dispatch_height, 1);
+        find_centroid_module.dispatch(&mut compute_pass);
     }
 
     queue.submit(Some(encoder.finish()));
 
-    let step = (0.00006754 * k.pow(2) as f32 - 0.09901 * k as f32 + 31.57).max(1.0) as usize;
+    let step = ((0.00006754 * k.pow(2) as f32 - 0.09901 * k as f32 + 31.57) as usize)
+        .max(1)
+        .min(30);
 
     let max_iteration = 100;
     let mut iteration = 0;
@@ -556,9 +477,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
                     compute_pass.dispatch(choose_centroid_dispatch_width, 1, 1);
                 }
 
-                compute_pass.set_pipeline(&find_centroid_pipeline);
-                compute_pass.set_bind_group(0, &find_centroid_bind_group, &[]);
-                compute_pass.dispatch(dispatch_with, dispatch_height, 1);
+                find_centroid_module.dispatch(&mut compute_pass);
 
                 iteration += 1;
                 if iteration >= max_iteration {
@@ -603,8 +522,8 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Swap and fetch result pass"),
         });
-        swap_module.compute(&mut compute_pass);
-        color_reverter_module.compute(&mut compute_pass);
+        swap_module.dispatch(&mut compute_pass);
+        color_reverter_module.dispatch(&mut compute_pass);
     }
     if let Some(query_set) = &query_set {
         encoder.write_timestamp(query_set, 1);
@@ -742,19 +661,9 @@ fn init_centroids(image: &Image, k: u32, color_space: &ColorSpace) -> Vec<u8> {
                     }
                     ColorSpace::Rgb => pixel.map(|component| component as f32 / 255.0),
                 }
-                // let lab: Lab = Srgba::new(pixel[0], pixel[1], pixel[2], pixel[3])
-                //     .into_format::<_, f32>()
-                //     .into_color();
-                // [lab.l, lab.a, lab.b, 1.0]
             })
             .collect::<Vec<f32>>(),
     ));
 
     centroids
-}
-
-/// Compute the next multiple of 256 for texture retrieval padding.
-fn padded_bytes_per_row(bytes_per_row: u64) -> u64 {
-    let padding = (256 - bytes_per_row % 256) % 256;
-    bytes_per_row + padding
 }
