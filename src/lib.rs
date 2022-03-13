@@ -1,25 +1,22 @@
 use anyhow::Result;
-use modules::{ColorConverterModule, ColorReverterModule, FindCentroidModule, Module, SwapModule};
+use modules::{
+    ChooseCentroidModule, ColorConverterModule, ColorReverterModule, FindCentroidModule, Module,
+    SwapModule,
+};
 use palette::{IntoColor, Lab, Srgba};
 use pollster::FutureExt;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::vec;
-use utils::{compute_work_group_count, padded_bytes_per_row};
+use utils::padded_bytes_per_row;
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
-    Backends, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry,
-    BindingResource, BindingType, Buffer, BufferAddress, BufferBinding, BufferBindingType,
-    BufferDescriptor, BufferUsages, ComputePipelineDescriptor, DeviceDescriptor, Features,
-    ImageDataLayout, Instance, MapMode, PipelineLayoutDescriptor, PowerPreference, QueryType,
-    RequestAdapterOptionsBase, ShaderSource, ShaderStages, TextureDimension, TextureFormat,
-    TextureUsages, TextureViewDescriptor,
+    Backends, BufferAddress, BufferDescriptor, BufferUsages, DeviceDescriptor, Features,
+    ImageDataLayout, Instance, MapMode, PowerPreference, QueryType, RequestAdapterOptionsBase,
+    TextureDimension, TextureFormat, TextureUsages,
 };
 
 mod modules;
 mod utils;
-
-const WORKGROUP_SIZE: u32 = 256;
-const N_SEQ: u32 = 24;
 
 pub struct Image {
     pub(crate) dimensions: (u32, u32),
@@ -198,235 +195,15 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         &centroid_buffer,
         &color_index_buffer,
     );
-
-    let choose_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
-        label: Some("Choose centroid shader"),
-        source: ShaderSource::Wgsl(include_str!("shaders/choose_centroid.wgsl").into()),
-    });
-
-    let choose_centroid_bind_group_0_layout =
-        device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("Choose centroid bind group 0 layout"),
-            entries: &[
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-            ],
-        });
-    let choose_centroid_bind_group_0 = device.create_bind_group(&BindGroupDescriptor {
-        label: None,
-        layout: &choose_centroid_bind_group_0_layout,
-        entries: &[
-            BindGroupEntry {
-                binding: 0,
-                resource: centroid_buffer.as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 1,
-                resource: color_index_buffer.as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 2,
-                resource: BindingResource::TextureView(
-                    &work_texture.create_view(&TextureViewDescriptor::default()),
-                ),
-            },
-        ],
-    });
-
-    let mut choose_centroid_settings_content: Vec<u8> = Vec::new();
-    choose_centroid_settings_content.extend_from_slice(bytemuck::cast_slice(&[N_SEQ]));
-    choose_centroid_settings_content
-        .extend_from_slice(bytemuck::cast_slice(&[color_space.convergence()]));
-    let choose_centroid_settings_buffer = device.create_buffer_init(&BufferInitDescriptor {
-        label: None,
-        contents: &choose_centroid_settings_content,
-        usage: BufferUsages::UNIFORM,
-    });
-
-    let (choose_centroid_dispatch_width, _) = compute_work_group_count(
-        (texture_size.width * texture_size.height, 1),
-        (WORKGROUP_SIZE * N_SEQ, 1),
+    let mut choose_centroid_module = ChooseCentroidModule::new(
+        &device,
+        color_space,
+        image,
+        k,
+        &work_texture,
+        &centroid_buffer,
+        &color_index_buffer,
     );
-    let color_buffer_size = choose_centroid_dispatch_width * 8 * 4;
-    let color_buffer = device.create_buffer(&BufferDescriptor {
-        label: None,
-        size: color_buffer_size as BufferAddress,
-        usage: BufferUsages::STORAGE,
-        mapped_at_creation: false,
-    });
-    let state_buffer_size = choose_centroid_dispatch_width * 4;
-    let state_buffer = device.create_buffer(&BufferDescriptor {
-        label: None,
-        size: state_buffer_size as BufferAddress,
-        usage: BufferUsages::STORAGE,
-        mapped_at_creation: false,
-    });
-    let convergence_buffer = device.create_buffer_init(&BufferInitDescriptor {
-        label: None,
-        contents: bytemuck::cast_slice::<u32, u8>(&vec![0; k as usize + 1]),
-        usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-    });
-
-    let check_convergence_buffer = device.create_buffer(&BufferDescriptor {
-        label: None,
-        size: (k + 1) as u64 * 4,
-        usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    let choose_centroid_bind_group_1_layout =
-        device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("Choose centroid bind group 1 layout"),
-            entries: &[
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
-    let choose_centroid_bind_group_1 = device.create_bind_group(&BindGroupDescriptor {
-        label: None,
-        layout: &choose_centroid_bind_group_1_layout,
-        entries: &[
-            BindGroupEntry {
-                binding: 0,
-                resource: color_buffer.as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 1,
-                resource: state_buffer.as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 2,
-                resource: convergence_buffer.as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 3,
-                resource: choose_centroid_settings_buffer.as_entire_binding(),
-            },
-        ],
-    });
-
-    let k_index_buffers: Vec<Buffer> = (0..k)
-        .map(|k| {
-            device.create_buffer_init(&BufferInitDescriptor {
-                label: None,
-                contents: bytemuck::cast_slice(&[k]),
-                usage: BufferUsages::UNIFORM,
-            })
-        })
-        .collect();
-
-    let k_index_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-        label: Some("Choose centroid bind group 2 layout"),
-        entries: &[BindGroupLayoutEntry {
-            binding: 0,
-            visibility: ShaderStages::COMPUTE,
-            ty: BindingType::Buffer {
-                ty: BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        }],
-    });
-    let k_index_bind_groups: Vec<_> = (0..k)
-        .map(|k| {
-            device.create_bind_group(&BindGroupDescriptor {
-                label: None,
-                layout: &k_index_bind_group_layout,
-                entries: &[BindGroupEntry {
-                    binding: 0,
-                    resource: BindingResource::Buffer(BufferBinding {
-                        buffer: &k_index_buffers[k as usize],
-                        offset: 0,
-                        size: None,
-                    }),
-                }],
-            })
-        })
-        .collect();
-
-    let choose_centroid_pipeline_layout =
-        device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            label: Some("Choose centroid pipeline layout"),
-            bind_group_layouts: &[
-                &choose_centroid_bind_group_0_layout,
-                &choose_centroid_bind_group_1_layout,
-                &k_index_bind_group_layout,
-            ],
-            push_constant_ranges: &[],
-        });
-    let choose_centroid_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-        label: Some("Choose centroid pipeline"),
-        layout: Some(&choose_centroid_pipeline_layout),
-        module: &choose_centroid_shader,
-        entry_point: "main",
-    });
 
     let swap_module = SwapModule::new(
         &device,
@@ -453,68 +230,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
 
     queue.submit(Some(encoder.finish()));
 
-    let step = ((0.00006754 * k.pow(2) as f32 - 0.09901 * k as f32 + 31.57) as usize)
-        .max(1)
-        .min(30);
-
-    let max_iteration = 100;
-    let mut iteration = 0;
-    'outer: loop {
-        let mut encoder =
-            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
-        {
-            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Choose centroid pass"),
-            });
-
-            for _ in 0..step {
-                compute_pass.set_pipeline(&choose_centroid_pipeline);
-                compute_pass.set_bind_group(0, &choose_centroid_bind_group_0, &[]);
-                compute_pass.set_bind_group(1, &choose_centroid_bind_group_1, &[]);
-                for i in 0..k {
-                    compute_pass.set_bind_group(2, &k_index_bind_groups[i as usize], &[]);
-                    compute_pass.dispatch(choose_centroid_dispatch_width, 1, 1);
-                }
-
-                find_centroid_module.dispatch(&mut compute_pass);
-
-                iteration += 1;
-                if iteration >= max_iteration {
-                    break 'outer;
-                }
-            }
-        }
-        encoder.copy_buffer_to_buffer(
-            &convergence_buffer,
-            0,
-            &check_convergence_buffer,
-            0,
-            (k + 1) as u64 * 4,
-        );
-
-        queue.submit(Some(encoder.finish()));
-
-        let check_convergence_slice = check_convergence_buffer.slice(..);
-        let check_convergence_future = check_convergence_slice.map_async(MapMode::Read);
-
-        device.poll(wgpu::Maintain::Wait);
-
-        match check_convergence_future.block_on() {
-            Ok(_) => {
-                let convergence_data =
-                    bytemuck::cast_slice::<u8, u32>(&check_convergence_slice.get_mapped_range())
-                        .to_vec();
-                if convergence_data[k as usize] >= k {
-                    // We converged, time to go.
-                    break;
-                }
-            }
-            Err(_) => break 'outer,
-        };
-
-        check_convergence_buffer.unmap();
-    }
+    choose_centroid_module.compute(&device, &queue, &find_centroid_module);
 
     let mut encoder =
         device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
