@@ -7,8 +7,8 @@ use wgpu::{
     BindGroupLayoutEntry, BindingResource, BindingType, Buffer, BufferAddress, BufferBinding,
     BufferBindingType, BufferDescriptor, BufferUsages, ComputePass, ComputePipeline,
     ComputePipelineDescriptor, Device, MapMode, PipelineLayoutDescriptor, Queue, ShaderSource,
-    ShaderStages, StorageTextureAccess, Texture, TextureFormat, TextureViewDescriptor,
-    TextureViewDimension,
+    ShaderStages, StorageTextureAccess, Texture, TextureFormat, TextureSampleType,
+    TextureViewDescriptor, TextureViewDimension,
 };
 
 use crate::{utils::compute_work_group_count, ColorSpace};
@@ -54,7 +54,7 @@ impl ColorConverterModule {
                         binding: 0,
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            sample_type: TextureSampleType::Float { filterable: true },
                             view_dimension: wgpu::TextureViewDimension::D2,
                             multisampled: false,
                         },
@@ -173,7 +173,7 @@ impl ColorReverterModule {
                         binding: 0,
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            sample_type: TextureSampleType::Float { filterable: false },
                             view_dimension: wgpu::TextureViewDimension::D2,
                             multisampled: false,
                         },
@@ -271,7 +271,7 @@ impl SwapModule {
         image_dimensions: (u32, u32),
         work_texture: &Texture,
         centroid_buffer: &Buffer,
-        color_index_buffer: &Buffer,
+        color_index_texture: &Texture,
     ) -> Self {
         let swap_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
             label: Some("Swap colors shader"),
@@ -294,10 +294,10 @@ impl SwapModule {
                 BindGroupLayoutEntry {
                     binding: 1,
                     visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Uint,
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
                     },
                     count: None,
                 },
@@ -324,7 +324,9 @@ impl SwapModule {
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: color_index_buffer.as_entire_binding(),
+                    resource: BindingResource::TextureView(
+                        &color_index_texture.create_view(&TextureViewDescriptor::default()),
+                    ),
                 },
                 BindGroupEntry {
                     binding: 2,
@@ -377,7 +379,7 @@ impl FindCentroidModule {
         image_dimensions: (u32, u32),
         work_texture: &Texture,
         centroid_buffer: &Buffer,
-        color_index_buffer: &Buffer,
+        color_index_texture: &Texture,
     ) -> Self {
         let find_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
             label: Some("Find centroid shader"),
@@ -392,7 +394,7 @@ impl FindCentroidModule {
                         binding: 0,
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            sample_type: TextureSampleType::Float { filterable: false },
                             view_dimension: wgpu::TextureViewDimension::D2,
                             multisampled: false,
                         },
@@ -411,10 +413,10 @@ impl FindCentroidModule {
                     BindGroupLayoutEntry {
                         binding: 2,
                         visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
+                        ty: BindingType::StorageTexture {
+                            access: StorageTextureAccess::WriteOnly,
+                            format: TextureFormat::R32Uint,
+                            view_dimension: TextureViewDimension::D2,
                         },
                         count: None,
                     },
@@ -459,7 +461,9 @@ impl FindCentroidModule {
                 },
                 BindGroupEntry {
                     binding: 2,
-                    resource: color_index_buffer.as_entire_binding(),
+                    resource: BindingResource::TextureView(
+                        &color_index_texture.create_view(&TextureViewDescriptor::default()),
+                    ),
                 },
             ],
         });
@@ -507,7 +511,7 @@ impl<'a> ChooseCentroidModule<'a> {
         k: u32,
         work_texture: &Texture,
         centroid_buffer: &Buffer,
-        color_index_buffer: &Buffer,
+        color_index_texture: &Texture,
         find_centroid_module: &'a FindCentroidModule,
     ) -> Self {
         const WORKGROUP_SIZE: u32 = 256;
@@ -534,10 +538,10 @@ impl<'a> ChooseCentroidModule<'a> {
                     BindGroupLayoutEntry {
                         binding: 1,
                         visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
+                        ty: BindingType::Texture {
+                            sample_type: TextureSampleType::Uint,
+                            view_dimension: TextureViewDimension::D2,
+                            multisampled: false,
                         },
                         count: None,
                     },
@@ -545,7 +549,7 @@ impl<'a> ChooseCentroidModule<'a> {
                         binding: 2,
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            sample_type: TextureSampleType::Float { filterable: false },
                             view_dimension: wgpu::TextureViewDimension::D2,
                             multisampled: false,
                         },
@@ -563,7 +567,9 @@ impl<'a> ChooseCentroidModule<'a> {
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: color_index_buffer.as_entire_binding(),
+                    resource: BindingResource::TextureView(
+                        &color_index_texture.create_view(&TextureViewDescriptor::default()),
+                    ),
                 },
                 BindGroupEntry {
                     binding: 2,

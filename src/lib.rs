@@ -170,19 +170,20 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         usage: TextureUsages::COPY_SRC | TextureUsages::STORAGE_BINDING,
     });
 
+    let color_index_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Color index texture"),
+        size: texture_size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: TextureFormat::R32Uint,
+        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
+    });
+
     let centroid_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label: None,
         contents: &centroids,
         usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-    });
-
-    let color_index_size =
-        (width * height) as BufferAddress * std::mem::size_of::<u32>() as BufferAddress;
-    let color_index_buffer = device.create_buffer(&BufferDescriptor {
-        label: None,
-        size: color_index_size,
-        usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
     });
 
     let color_converter_module = ColorConverterModule::new(
@@ -204,7 +205,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         image.dimensions,
         &work_texture,
         &centroid_buffer,
-        &color_index_buffer,
+        &color_index_texture,
     );
     let mut choose_centroid_module = ChooseCentroidModule::new(
         &device,
@@ -213,7 +214,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         k,
         &work_texture,
         &centroid_buffer,
-        &color_index_buffer,
+        &color_index_texture,
         &find_centroid_module,
     );
 
@@ -222,7 +223,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         image.dimensions,
         &work_texture,
         &centroid_buffer,
-        &color_index_buffer,
+        &color_index_texture,
     );
 
     let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
@@ -430,19 +431,20 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
         usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
     });
 
+    let color_index_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Color index texture"),
+        size: texture_size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: TextureFormat::R32Uint,
+        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
+    });
+
     let centroid_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label: None,
         contents: &centroids,
         usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-    });
-
-    let color_index_size =
-        (width * height) as BufferAddress * std::mem::size_of::<u32>() as BufferAddress;
-    let color_index_buffer = device.create_buffer(&BufferDescriptor {
-        label: None,
-        size: color_index_size,
-        usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
     });
 
     let color_converter_module = ColorConverterModule::new(
@@ -457,7 +459,7 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
         image.dimensions,
         &work_texture,
         &centroid_buffer,
-        &color_index_buffer,
+        &color_index_texture,
     );
     let mut choose_centroid_module = ChooseCentroidModule::new(
         &device,
@@ -466,7 +468,7 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
         k,
         &work_texture,
         &centroid_buffer,
-        &color_index_buffer,
+        &color_index_texture,
         &find_centroid_module,
     );
 
