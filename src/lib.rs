@@ -490,7 +490,7 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
     );
 
     let convert_centroid_colors_module =
-        ConvertCentroidColorsModule::new(&device, k, color_space, &centroid_buffer);
+        ConvertCentroidColorsModule::new(&device, color_space, &centroid_buffer);
 
     let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
     if let Some(query_set) = &query_set {

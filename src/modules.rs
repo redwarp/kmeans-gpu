@@ -870,17 +870,11 @@ struct ConvertCentroidColorsContext {
 }
 
 pub(crate) struct ConvertCentroidColorsModule {
-    k: u32,
     context: Option<ConvertCentroidColorsContext>,
 }
 
 impl ConvertCentroidColorsModule {
-    pub(crate) fn new(
-        device: &Device,
-        k: u32,
-        color_space: &ColorSpace,
-        centroid_buffer: &Buffer,
-    ) -> Self {
+    pub(crate) fn new(device: &Device, color_space: &ColorSpace, centroid_buffer: &Buffer) -> Self {
         let context = match color_space {
             ColorSpace::Lab => {
                 let shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
@@ -936,7 +930,7 @@ impl ConvertCentroidColorsModule {
             ColorSpace::Rgb => None,
         };
 
-        Self { k, context }
+        Self { context }
     }
 }
 

@@ -8,7 +8,6 @@ use anyhow::Result;
 use clap::{command, Arg, ArgMatches, Command};
 use image::{ImageBuffer, Rgba};
 use k_means_gpu::{kmeans, palette, ColorSpace, Image};
-use palette::Srgb;
 
 fn main() -> Result<()> {
     let matches = command!()
