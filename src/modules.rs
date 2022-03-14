@@ -863,3 +863,89 @@ impl<'a> ComputeBlock<()> for ChooseCentroidModule<'a> {
         }
     }
 }
+
+struct ConvertCentroidColorsContext {
+    pipeline: ComputePipeline,
+    bind_group: BindGroup,
+}
+
+pub(crate) struct ConvertCentroidColorsModule {
+    k: u32,
+    context: Option<ConvertCentroidColorsContext>,
+}
+
+impl ConvertCentroidColorsModule {
+    pub(crate) fn new(
+        device: &Device,
+        k: u32,
+        color_space: &ColorSpace,
+        centroid_buffer: &Buffer,
+    ) -> Self {
+        let context = match color_space {
+            ColorSpace::Lab => {
+                let shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+                    label: None,
+                    source: ShaderSource::Wgsl(
+                        include_str!("shaders/converters/centroid_lab_to_rgb.wgsl").into(),
+                    ),
+                });
+
+                let bind_group_layout =
+                    device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                        label: None,
+                        entries: &[BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: ShaderStages::COMPUTE,
+                            ty: BindingType::Buffer {
+                                ty: BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        }],
+                    });
+
+                let bind_group = device.create_bind_group(&BindGroupDescriptor {
+                    label: None,
+                    layout: &bind_group_layout,
+                    entries: &[BindGroupEntry {
+                        binding: 0,
+                        resource: centroid_buffer.as_entire_binding(),
+                    }],
+                });
+
+                let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+                    label: None,
+                    bind_group_layouts: &[&bind_group_layout],
+                    push_constant_ranges: &[],
+                });
+
+                let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+                    label: None,
+                    layout: Some(&pipeline_layout),
+                    module: &shader,
+                    entry_point: "main",
+                });
+
+                Some(ConvertCentroidColorsContext {
+                    pipeline,
+                    bind_group,
+                })
+            }
+
+            ColorSpace::Rgb => None,
+        };
+
+        Self { k, context }
+    }
+}
+
+impl Module for ConvertCentroidColorsModule {
+    fn dispatch<'a>(&'a self, compute_pass: &mut ComputePass<'a>) {
+        if let Some(context) = &self.context {
+            compute_pass.set_pipeline(&context.pipeline);
+            compute_pass.set_bind_group(0, &context.bind_group, &[]);
+            compute_pass.dispatch(1, 1, 1);
+        }
+    }
+}
