@@ -1,7 +1,7 @@
 use anyhow::Result;
 use modules::{
-    ChooseCentroidModule, ColorConverterModule, ColorReverterModule, FindCentroidModule, Module,
-    SwapModule,
+    ChooseCentroidModule, ColorConverterModule, ColorReverterModule, ComputeBlock,
+    FindCentroidModule, Module, SwapModule,
 };
 use palette::{IntoColor, Lab, Srgba};
 use pollster::FutureExt;
@@ -11,8 +11,8 @@ use utils::padded_bytes_per_row;
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
     Backends, BufferAddress, BufferDescriptor, BufferUsages, DeviceDescriptor, Features,
-    ImageDataLayout, Instance, MapMode, PowerPreference, QueryType, RequestAdapterOptionsBase,
-    TextureDimension, TextureFormat, TextureUsages,
+    ImageDataLayout, Instance, MapMode, PowerPreference, QuerySetDescriptor, QueryType,
+    RequestAdapterOptionsBase, TextureDimension, TextureFormat, TextureUsages,
 };
 
 mod modules;
@@ -108,7 +108,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         .block_on()?;
 
     let query_set = if features.contains(Features::TIMESTAMP_QUERY) {
-        Some(device.create_query_set(&wgpu::QuerySetDescriptor {
+        Some(device.create_query_set(&QuerySetDescriptor {
             count: 2,
             ty: QueryType::Timestamp,
             label: None,
@@ -184,13 +184,23 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         mapped_at_creation: false,
     });
 
-    let color_converter_module =
-        ColorConverterModule::new(&device, color_space, image, &input_texture, &work_texture);
-    let color_reverter_module =
-        ColorReverterModule::new(&device, color_space, image, &work_texture, &output_texture);
+    let color_converter_module = ColorConverterModule::new(
+        &device,
+        color_space,
+        image.dimensions,
+        &input_texture,
+        &work_texture,
+    );
+    let color_reverter_module = ColorReverterModule::new(
+        &device,
+        color_space,
+        image.dimensions,
+        &work_texture,
+        &output_texture,
+    );
     let find_centroid_module = FindCentroidModule::new(
         &device,
-        image,
+        image.dimensions,
         &work_texture,
         &centroid_buffer,
         &color_index_buffer,
@@ -198,16 +208,17 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
     let mut choose_centroid_module = ChooseCentroidModule::new(
         &device,
         color_space,
-        image,
+        image.dimensions,
         k,
         &work_texture,
         &centroid_buffer,
         &color_index_buffer,
+        &find_centroid_module,
     );
 
     let swap_module = SwapModule::new(
         &device,
-        image,
+        image.dimensions,
         &work_texture,
         &centroid_buffer,
         &color_index_buffer,
@@ -221,7 +232,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
 
     {
         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Kmean pass"),
+            label: Some("Init pass"),
         });
         color_converter_module.dispatch(&mut compute_pass);
 
@@ -230,7 +241,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
 
     queue.submit(Some(encoder.finish()));
 
-    choose_centroid_module.compute(&device, &queue, &find_centroid_module);
+    choose_centroid_module.compute(&device, &queue);
 
     let mut encoder =
         device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -304,8 +315,8 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
     if let Ok(()) = cent_buffer_future.block_on() {
         let data = cent_buffer_slice.get_mapped_range();
 
-        for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[4..])
-            .chunks(4)
+        for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[16..])
+            .chunks_exact(4)
             .enumerate()
         {
             println!("Centroid {index} = {k:?}")
@@ -343,7 +354,8 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
 
 fn init_centroids(image: &Image, k: u32, color_space: &ColorSpace) -> Vec<u8> {
     let mut centroids: Vec<u8> = vec![];
-    centroids.extend_from_slice(bytemuck::cast_slice(&[k]));
+    // Aligned 16, see https://www.w3.org/TR/WGSL/#address-space-layout-constraints
+    centroids.extend_from_slice(bytemuck::cast_slice(&[k, 0, 0, 0]));
 
     let mut rng = StdRng::seed_from_u64(42);
 

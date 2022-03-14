@@ -11,10 +11,14 @@ use wgpu::{
     TextureViewDimension,
 };
 
-use crate::{utils::compute_work_group_count, ColorSpace, Image};
+use crate::{utils::compute_work_group_count, ColorSpace};
 
 pub(crate) trait Module {
     fn dispatch<'a>(&'a self, compute_pass: &mut ComputePass<'a>);
+}
+
+pub(crate) trait ComputeBlock<T> {
+    fn compute(&mut self, device: &Device, queue: &Queue) -> T;
 }
 
 pub(crate) struct ColorConverterModule {
@@ -27,7 +31,7 @@ impl ColorConverterModule {
     pub fn new(
         device: &Device,
         color_space: &ColorSpace,
-        image: &Image,
+        image_dimensions: (u32, u32),
         input_texture: &Texture,
         work_texture: &Texture,
     ) -> Self {
@@ -118,7 +122,7 @@ impl ColorConverterModule {
             ],
         });
 
-        let dispatch_size = compute_work_group_count(image.dimensions, (16, 16));
+        let dispatch_size = compute_work_group_count(image_dimensions, (16, 16));
 
         Self {
             pipeline,
@@ -146,7 +150,7 @@ impl ColorReverterModule {
     pub fn new(
         device: &Device,
         color_space: &ColorSpace,
-        image: &Image,
+        image_dimensions: (u32, u32),
         work_texture: &Texture,
         output_texture: &Texture,
     ) -> Self {
@@ -237,7 +241,7 @@ impl ColorReverterModule {
             ],
         });
 
-        let dispatch_size = compute_work_group_count(image.dimensions, (16, 16));
+        let dispatch_size = compute_work_group_count(image_dimensions, (16, 16));
 
         Self {
             pipeline,
@@ -264,7 +268,7 @@ pub(crate) struct SwapModule {
 impl SwapModule {
     pub fn new(
         device: &Device,
-        image: &Image,
+        image_dimensions: (u32, u32),
         work_texture: &Texture,
         centroid_buffer: &Buffer,
         color_index_buffer: &Buffer,
@@ -343,7 +347,7 @@ impl SwapModule {
             entry_point: "main",
         });
 
-        let dispatch_size = compute_work_group_count(image.dimensions, (16, 16));
+        let dispatch_size = compute_work_group_count(image_dimensions, (16, 16));
 
         Self {
             pipeline: swap_pipeline,
@@ -370,7 +374,7 @@ pub(crate) struct FindCentroidModule {
 impl FindCentroidModule {
     pub fn new(
         device: &Device,
-        image: &Image,
+        image_dimensions: (u32, u32),
         work_texture: &Texture,
         centroid_buffer: &Buffer,
         color_index_buffer: &Buffer,
@@ -460,7 +464,7 @@ impl FindCentroidModule {
             ],
         });
 
-        let dispatch_size = compute_work_group_count(image.dimensions, (16, 16));
+        let dispatch_size = compute_work_group_count(image_dimensions, (16, 16));
 
         Self {
             pipeline: find_centroid_pipeline,
@@ -483,7 +487,7 @@ pub(crate) struct ConvergenceBuffer {
     mapped_buffer: Buffer,
 }
 
-pub(crate) struct ChooseCentroidModule {
+pub(crate) struct ChooseCentroidModule<'a> {
     k: u32,
     pipeline: ComputePipeline,
     bind_group_0: BindGroup,
@@ -491,16 +495,20 @@ pub(crate) struct ChooseCentroidModule {
     bind_groups: Vec<BindGroup>,
     dispatch_size: u32,
     convergence_buffer: ConvergenceBuffer,
+    find_centroid_module: &'a FindCentroidModule,
 }
-impl ChooseCentroidModule {
+
+impl<'a> ChooseCentroidModule<'a> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         device: &Device,
         color_space: &ColorSpace,
-        image: &Image,
+        image_dimensions: (u32, u32),
         k: u32,
         work_texture: &Texture,
         centroid_buffer: &Buffer,
         color_index_buffer: &Buffer,
+        find_centroid_module: &'a FindCentroidModule,
     ) -> Self {
         const WORKGROUP_SIZE: u32 = 256;
         const N_SEQ: u32 = 24;
@@ -577,7 +585,7 @@ impl ChooseCentroidModule {
         });
 
         let (dispatch_size, _) = compute_work_group_count(
-            (image.dimensions.0 * image.dimensions.1, 1),
+            (image_dimensions.0 * image_dimensions.1, 1),
             (WORKGROUP_SIZE * N_SEQ, 1),
         );
         let color_buffer_size = dispatch_size * 8 * 4;
@@ -746,15 +754,13 @@ impl ChooseCentroidModule {
                 gpu_buffer: convergence_buffer,
                 mapped_buffer: check_convergence_buffer,
             },
+            find_centroid_module,
         }
     }
+}
 
-    pub fn compute(
-        &mut self,
-        device: &Device,
-        queue: &Queue,
-        find_centroid_module: &FindCentroidModule,
-    ) {
+impl<'a> ComputeBlock<()> for ChooseCentroidModule<'a> {
+    fn compute(&mut self, device: &Device, queue: &Queue) {
         let max_obs_chain = 32;
         let max_iteration = 128;
         let max_step_before_convergence_check = 8;
@@ -775,12 +781,14 @@ impl ChooseCentroidModule {
             compute_pass.set_bind_group(0, &self.bind_group_0, &[]);
             compute_pass.set_bind_group(1, &self.bind_group_1, &[]);
 
+            #[allow(clippy::mut_range_bound)]
             for step in current_step..max_step_before_convergence_check {
                 for k in current_k..self.k {
                     compute_pass.set_bind_group(2, &self.bind_groups[k as usize], &[]);
                     compute_pass.dispatch(self.dispatch_size, 1, 1);
                     op_count += 1;
 
+                    #[allow(clippy::mut_range_bound)]
                     if op_count >= max_obs_chain {
                         current_k = k + 1;
                         current_step = step;
@@ -806,7 +814,7 @@ impl ChooseCentroidModule {
                     current_k = 0;
                 }
 
-                find_centroid_module.dispatch(&mut compute_pass);
+                self.find_centroid_module.dispatch(&mut compute_pass);
 
                 iteration += 1;
                 current_step += 1;

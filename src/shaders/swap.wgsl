@@ -1,6 +1,6 @@
 struct Centroids {
     count: u32;
-    data: array<f32>;
+    data: array<vec4<f32>>;
 };
 
 struct Indices {
@@ -23,12 +23,6 @@ fn main(
     }
 
     let index = color_indices.data[global_id.y * u32(dimensions.x) + global_id.x];
-    let color = vec4<f32>(
-        centroids.data[index * 4u + 0u],
-        centroids.data[index * 4u + 1u],
-        centroids.data[index * 4u + 2u],
-        centroids.data[index * 4u + 3u],
-    );
     
-    textureStore(output_texture, coords.xy, color);
+    textureStore(output_texture, coords.xy, centroids.data[index]);
 }

@@ -1,6 +1,6 @@
 struct Centroids {
     count: u32;
-    data: array<f32>;
+    data: array<vec4<f32>>;
 };
 
 struct Indices {
@@ -31,12 +31,7 @@ fn main(
     var found_index: u32 = centroids.count;
 
     for(var index: u32 = 0u; index < centroids.count; index = index + 1u){
-        let centroid_components : vec4<f32> = vec4<f32>(
-            centroids.data[index * 4u + 0u],
-            centroids.data[index * 4u + 1u],
-            centroids.data[index * 4u + 2u],
-            centroids.data[index * 4u + 3u],
-        );
+        let centroid_components : vec4<f32> = centroids.data[index];
 
         let distance: f32 = distance(pixel.rgb, centroid_components.rgb);
 

@@ -1,6 +1,7 @@
 struct Centroids {
     count: u32;
-    data: array<f32>;
+    // Aligned 16. See https://www.w3.org/TR/WGSL/#address-space-layout-constraints
+    data: array<vec4<f32>>;
 };
 
 struct Indices {
@@ -176,17 +177,9 @@ fn main(
         let sum = shared_prefix + local;
         if(sum.a > 0.0) {
             let new_centroid = vec4<f32>(sum.rgb / sum.a, 1.0);
-            let previous_centroid = vec4<f32>(
-                centroids.data[k * 4u + 0u],
-                centroids.data[k * 4u + 1u],
-                centroids.data[k * 4u + 2u],
-                centroids.data[k * 4u + 3u],
-            );
+            let previous_centroid = centroids.data[k];
 
-            centroids.data[k * 4u + 0u] = new_centroid.r;
-            centroids.data[k * 4u + 1u] = new_centroid.g;
-            centroids.data[k * 4u + 2u] = new_centroid.b;
-            centroids.data[k * 4u + 3u] = new_centroid.a;
+            centroids.data[k] = new_centroid;
 
             atomicStore(&convergence.data[k], u32(distance(new_centroid, previous_centroid) < settings.convergence));
         }
