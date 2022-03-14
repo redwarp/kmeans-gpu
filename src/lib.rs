@@ -3,7 +3,7 @@ use modules::{
     ChooseCentroidModule, ColorConverterModule, ColorReverterModule, ComputeBlock,
     FindCentroidModule, Module, SwapModule,
 };
-use palette::{IntoColor, Lab, Srgba};
+use palette::{IntoColor, Lab, Pixel, Srgba};
 use pollster::FutureExt;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::vec;
@@ -15,8 +15,6 @@ use wgpu::{
     PowerPreference, QuerySetDescriptor, QueryType, RequestAdapterOptionsBase, TextureDimension,
     TextureFormat, TextureUsages,
 };
-
-use crate::modules::ConvertCentroidColorsModule;
 
 mod modules;
 mod utils;
@@ -432,16 +430,6 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
         usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
     });
 
-    let output_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("output texture"),
-        size: texture_size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: TextureDimension::D2,
-        format: TextureFormat::Rgba8Unorm,
-        usage: TextureUsages::COPY_SRC | TextureUsages::STORAGE_BINDING,
-    });
-
     let centroid_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label: None,
         contents: &centroids,
@@ -464,13 +452,6 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
         &input_texture,
         &work_texture,
     );
-    let color_reverter_module = ColorReverterModule::new(
-        &device,
-        color_space,
-        image.dimensions,
-        &work_texture,
-        &output_texture,
-    );
     let find_centroid_module = FindCentroidModule::new(
         &device,
         image.dimensions,
@@ -488,9 +469,6 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
         &color_index_buffer,
         &find_centroid_module,
     );
-
-    let convert_centroid_colors_module =
-        ConvertCentroidColorsModule::new(&device, color_space, &centroid_buffer);
 
     let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
     if let Some(query_set) = &query_set {
@@ -511,13 +489,6 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
     choose_centroid_module.compute(&device, &queue);
 
     let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
-    {
-        let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-            label: Some("Swap and fetch result pass"),
-        });
-        convert_centroid_colors_module.dispatch(&mut compute_pass);
-        color_reverter_module.dispatch(&mut compute_pass);
-    }
     if let Some(query_set) = &query_set {
         encoder.write_timestamp(query_set, 1);
     }
@@ -565,16 +536,20 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
             {
                 println!("Centroid {index} = {k:?}")
             }
-
             let colors: Vec<_> = bytemuck::cast_slice::<u8, f32>(&data[16..])
                 .chunks_exact(4)
                 .map(|color| {
-                    [
-                        (color[0] * 255.0) as u8,
-                        (color[1] * 255.0) as u8,
-                        (color[2] * 255.0) as u8,
-                        (color[3] * 255.0) as u8,
-                    ]
+                    let raw: [u8; 4] = match color_space {
+                        ColorSpace::Lab => {
+                            IntoColor::<Srgba>::into_color(Lab::new(color[0], color[1], color[2]))
+                                .into_format()
+                                .into_raw()
+                        }
+                        ColorSpace::Rgb => Srgba::new(color[0], color[1], color[2], 1.0)
+                            .into_format()
+                            .into_raw(),
+                    };
+                    raw
                 })
                 .collect();
             Ok(colors)
