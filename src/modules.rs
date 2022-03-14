@@ -65,7 +65,7 @@ impl ColorConverterModule {
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::StorageTexture {
                             access: StorageTextureAccess::WriteOnly,
-                            format: TextureFormat::Rgba32Float,
+                            format: TextureFormat::Rgba16Float,
                             view_dimension: TextureViewDimension::D2,
                         },
                         count: None,
@@ -110,7 +110,7 @@ impl ColorConverterModule {
                     resource: BindingResource::TextureView(&work_texture.create_view(
                         &TextureViewDescriptor {
                             label: None,
-                            format: Some(TextureFormat::Rgba32Float),
+                            format: Some(TextureFormat::Rgba16Float),
                             aspect: wgpu::TextureAspect::All,
                             base_mip_level: 0,
                             mip_level_count: NonZeroU32::new(1),
@@ -215,7 +215,7 @@ impl ColorReverterModule {
                     resource: BindingResource::TextureView(&work_texture.create_view(
                         &TextureViewDescriptor {
                             label: None,
-                            format: Some(TextureFormat::Rgba32Float),
+                            format: Some(TextureFormat::Rgba16Float),
                             aspect: wgpu::TextureAspect::All,
                             base_mip_level: 0,
                             mip_level_count: NonZeroU32::new(1),
@@ -306,7 +306,7 @@ impl SwapModule {
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
                         access: StorageTextureAccess::WriteOnly,
-                        format: TextureFormat::Rgba32Float,
+                        format: TextureFormat::Rgba16Float,
                         view_dimension: TextureViewDimension::D2,
                     },
                     count: None,
@@ -444,7 +444,7 @@ impl FindCentroidModule {
                     resource: BindingResource::TextureView(&work_texture.create_view(
                         &TextureViewDescriptor {
                             label: None,
-                            format: Some(TextureFormat::Rgba32Float),
+                            format: Some(TextureFormat::Rgba16Float),
                             aspect: wgpu::TextureAspect::All,
                             base_mip_level: 0,
                             mip_level_count: NonZeroU32::new(1),

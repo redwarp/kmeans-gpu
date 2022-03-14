@@ -1,5 +1,5 @@
 [[group(0), binding(0)]] var input_texture : texture_2d<f32>;
-[[group(0), binding(1)]] var output_texture : texture_storage_2d<rgba32float, write>;
+[[group(0), binding(1)]] var output_texture : texture_storage_2d<rgba16float, write>;
 
 [[stage(compute), workgroup_size(16, 16)]]
 fn main(
