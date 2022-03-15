@@ -133,6 +133,9 @@ fn palette_subcommand(matches: &ArgMatches) -> Result<()> {
 
     let result = palette(k, &image, &color_space)?;
 
+    let path = palette_file(input, k, &color_space)?;
+    save_palette(path, &result)?;
+
     let colors = result
         .into_iter()
         .map(|color| format!("#{:02X}{:02X}{:02X}", color[0], color[1], color[2]))
@@ -185,6 +188,28 @@ fn output_file(
     }
 }
 
+fn palette_file(input: &str, k: u32, color_space: &ColorSpace) -> Result<PathBuf> {
+    let path = Path::new(input);
+    let parent = path.parent();
+    let stem = path
+        .file_stem()
+        .expect("Expecting .jpg or .png files")
+        .to_string_lossy();
+    let extension = "png";
+
+    let filename = format!(
+        "{stem}-palette-{cs}-k{k}.{extension}",
+        cs = color_space.name()
+    );
+    let output_path = if let Some(parent) = parent {
+        parent.join(filename)
+    } else {
+        Path::new(&filename).to_path_buf()
+    };
+
+    Ok(output_path)
+}
+
 trait Openable: Sized {
     fn open<P>(path: P) -> Result<Self>
     where
@@ -202,4 +227,25 @@ impl Openable for Image {
 
         Ok(image)
     }
+}
+
+fn save_palette<P>(path: P, palette: &[[u8; 4]]) -> Result<()>
+where
+    P: AsRef<Path>,
+{
+    let height = 40;
+    let width = palette.len() as u32 * height;
+
+    let mut image_buffer: image::RgbaImage = image::ImageBuffer::new(width, height);
+
+    for (x, _, pixel) in image_buffer.enumerate_pixels_mut() {
+        let index = (x / height) as usize;
+        let color = palette[index];
+
+        *pixel = image::Rgba(color);
+    }
+
+    image_buffer.save(path)?;
+
+    Ok(())
 }

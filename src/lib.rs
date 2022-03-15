@@ -587,7 +587,7 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
             {
                 println!("Centroid {index} = {k:?}")
             }
-            let colors: Vec<_> = bytemuck::cast_slice::<u8, f32>(&data[16..])
+            let mut colors: Vec<_> = bytemuck::cast_slice::<u8, f32>(&data[16..])
                 .chunks_exact(4)
                 .map(|color| {
                     let raw: [u8; 4] = match color_space {
@@ -603,6 +603,11 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
                     raw
                 })
                 .collect();
+            colors.sort_unstable_by(|a, b| {
+                let a: Lab = Srgba::from_raw(a).into_format::<_, f32>().into_color();
+                let b: Lab = Srgba::from_raw(b).into_format::<_, f32>().into_color();
+                a.l.partial_cmp(&b.l).unwrap()
+            });
             Ok(colors)
         }
         Err(e) => Err(e.into()),

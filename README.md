@@ -10,17 +10,27 @@ Not there yet.
 
 * Currently initialize centroids with random values, should look how complex it is to paralellize kmean++ init.
 
-As this loads an image as a texture to your graphic cards, it also comes with some limitation based on the GPU backends. Like, it probably won't work if the original image is bigger than 4086x4086 pixels.
+As this loads an image as a texture to your graphic cards, it also comes with some limitation based on the GPU backends: It won't work if the original image is bigger than **8192x8192** pixels.
 
 ## Sample
 
 ![Tokyo](gfx/tokyo.jpg)
 
+### Create image with colors replaced by their kmeans variant:
+
 ```rust
-cargo run --release -- -i .\gfx\tokyo.jpg -k 6
+cargo run --release -- kmeans -i .\gfx\tokyo.jpg -k 6
 ```
 
-![Tokyo with k=4](gfx/tokyo-lab-k6.png)
+![Tokyo with k=6](gfx/tokyo-lab-k6.png)
+
+### Output the palette:
+
+```rust
+cargo run --release -- palette -i .\gfx\tokyo.jpg -k 6
+```
+
+![Tokyo palette with k=6](gfx/tokyo-palette-lab-k6.png)
 
 ## Sources
 
