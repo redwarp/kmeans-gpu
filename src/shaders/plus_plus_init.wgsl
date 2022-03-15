@@ -126,10 +126,10 @@ fn main(
     var flag = FLAG_AGGREGATE_READY;
     
     if (local_id.x == workgroup_size - 1u) {
-        atomicStoreCandidate(workgroup_id.x * 8u + 4u, local);
+        atomicStoreCandidate(workgroup_id.x * 4u + 2u, local);
         if (workgroup_id.x == 0u) {
             // Special case for group 0.
-            atomicStoreCandidate(workgroup_id.x * 8u + 0u, local);
+            atomicStoreCandidate(workgroup_id.x * 4u + 0u, local);
             flag = FLAG_PREFIX_READY;
         }
     }
@@ -153,7 +153,7 @@ fn main(
 
             if (flag == FLAG_PREFIX_READY) {
                 if (local_id.x == workgroup_size - 1u) {
-                    let their_prefix = atomicLoadCandidate(loop_back_ix * 8u);
+                    let their_prefix = atomicLoadCandidate(loop_back_ix * 4u + 0u);
                     if (their_prefix.distance > exclusive_prefix.distance) {
                         exclusive_prefix.distance = their_prefix.distance;
                         exclusive_prefix.index = their_prefix.index;
@@ -162,7 +162,7 @@ fn main(
                 break;
             } else if (flag == FLAG_AGGREGATE_READY) {                
                 if (local_id.x == workgroup_size - 1u) {                    
-                    let their_aggregate = atomicLoadCandidate(loop_back_ix * 8u + 4u);                    
+                    let their_aggregate = atomicLoadCandidate(loop_back_ix * 4u + 2u);                    
                     if (their_aggregate.distance > exclusive_prefix.distance) {
                         exclusive_prefix.distance = their_aggregate.distance;
                         exclusive_prefix.index = their_aggregate.index;
@@ -187,7 +187,7 @@ fn main(
 
             shared_prefix = exclusive_prefix;
             
-            atomicStoreCandidate(workgroup_id.x * 8u + 0u, inclusive_prefix);
+            atomicStoreCandidate(workgroup_id.x * 2u + 0u, inclusive_prefix);
             atomicStore(&flag_buffer.data[workgroup_id.x], FLAG_PREFIX_READY);
         }
         workgroupBarrier();

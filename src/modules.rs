@@ -947,10 +947,10 @@ impl PlusPlusInitModule {
             (image_dimensions.0 * image_dimensions.1, 1),
             (WORKGROUP_SIZE * N_SEQ, 1),
         );
-        let color_buffer_size = dispatch_size * 8 * 4;
-        let color_buffer = device.create_buffer(&BufferDescriptor {
+        let prefix_buffer_size = dispatch_size * 4 * 4;
+        let prefix_buffer = device.create_buffer(&BufferDescriptor {
             label: None,
-            size: color_buffer_size as BufferAddress,
+            size: prefix_buffer_size as BufferAddress,
             usage: BufferUsages::STORAGE,
             mapped_at_creation: false,
         });
@@ -978,7 +978,7 @@ impl PlusPlusInitModule {
                 },
                 BindGroupEntry {
                     binding: 2,
-                    resource: color_buffer.as_entire_binding(),
+                    resource: prefix_buffer.as_entire_binding(),
                 },
                 BindGroupEntry {
                     binding: 3,
@@ -1057,42 +1057,25 @@ impl PlusPlusInitModule {
 impl ComputeBlock<()> for PlusPlusInitModule {
     fn compute(&self, device: &Device, queue: &Queue) {
         let max_obs_chain = 32;
-        let mut op_count;
-        let mut current_k = 0;
-        let mut finish = false;
 
-        'iteration: loop {
-            op_count = 0;
+        for k_start in (0..self.k as usize - 1).step_by(max_obs_chain) {
+            let max_k = (k_start + max_obs_chain).min(self.k as usize - 1);
+
             let mut encoder =
                 device.create_command_encoder(&CommandEncoderDescriptor { label: None });
-            let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                label: Some("Plus plus init pass"),
-            });
-            compute_pass.set_pipeline(&self.pipeline);
-            compute_pass.set_bind_group(0, &self.bind_group, &[]);
-            #[allow(clippy::mut_range_bound)]
-            for k in current_k..self.k - 1 {
-                compute_pass.set_bind_group(1, &self.bind_groups[k as usize], &[]);
-                compute_pass.dispatch(self.dispatch_size, 1, 1);
-                op_count += 1;
-
-                if k >= self.k - 2 {
-                    finish = true;
-                }
-
-                #[allow(clippy::mut_range_bound)]
-                if op_count >= max_obs_chain {
-                    current_k = k + 1;
-                    break;
+            {
+                let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                    label: Some("Plus plus init pass"),
+                });
+                compute_pass.set_pipeline(&self.pipeline);
+                compute_pass.set_bind_group(0, &self.bind_group, &[]);
+                for k in k_start..max_k {
+                    compute_pass.set_bind_group(1, &self.bind_groups[k as usize], &[]);
+                    compute_pass.dispatch(self.dispatch_size, 1, 1);
                 }
             }
 
-            drop(compute_pass);
             queue.submit(Some(encoder.finish()));
-
-            if finish {
-                break 'iteration;
-            }
         }
     }
 }
