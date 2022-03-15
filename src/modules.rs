@@ -873,21 +873,22 @@ impl<'a> ComputeBlock<()> for ChooseCentroidModule<'a> {
     }
 }
 
-pub(crate) struct PlusPlusInitModule {
+pub(crate) struct PlusPlusInitModule<'a> {
     k: u32,
     pipeline: ComputePipeline,
     bind_group: BindGroup,
     bind_groups: Vec<BindGroup>,
     dispatch_size: u32,
+    centroid_buffer: &'a Buffer,
 }
 
-impl PlusPlusInitModule {
+impl<'a> PlusPlusInitModule<'a> {
     pub(crate) fn new(
         device: &Device,
         image_dimensions: (u32, u32),
         k: u32,
         work_texture: &WorkTexture,
-        centroid_buffer: &Buffer,
+        centroid_buffer: &'a Buffer,
     ) -> Self {
         const WORKGROUP_SIZE: u32 = 256;
         const N_SEQ: u32 = 24;
@@ -1050,12 +1051,21 @@ impl PlusPlusInitModule {
             bind_group,
             bind_groups,
             dispatch_size,
+            centroid_buffer,
         }
     }
 }
 
-impl ComputeBlock<()> for PlusPlusInitModule {
+impl<'a> ComputeBlock<()> for PlusPlusInitModule<'a> {
     fn compute(&self, device: &Device, queue: &Queue) {
+        let centroid_size = (self.k as u64 + 1) * 16;
+        let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: centroid_size,
+            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
         let max_obs_chain = 32;
 
         for k_start in (0..self.k as usize - 1).step_by(max_obs_chain) {
@@ -1076,6 +1086,30 @@ impl ComputeBlock<()> for PlusPlusInitModule {
             }
 
             queue.submit(Some(encoder.finish()));
+            device.poll(wgpu::Maintain::Wait);
         }
+
+        // let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
+        // encoder.copy_buffer_to_buffer(&self.centroid_buffer, 0, &staging_buffer, 0, centroid_size);
+
+        // queue.submit(Some(encoder.finish()));
+        // let cent_buffer_slice = staging_buffer.slice(..);
+        // let cent_buffer_future = cent_buffer_slice.map_async(MapMode::Read);
+
+        // device.poll(wgpu::Maintain::Wait);
+
+        // if let Ok(()) = cent_buffer_future.block_on() {
+        //     let data = cent_buffer_slice.get_mapped_range();
+
+        //     for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[16..])
+        //         .chunks_exact(4)
+        //         .enumerate()
+        //     {
+        //         println!("Centroid {index} = {k:?}")
+        //     }
+        //     // println!();
+        // }
+
+        // staging_buffer.unmap();
     }
 }
