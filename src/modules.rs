@@ -21,7 +21,7 @@ pub(crate) trait Module {
 }
 
 pub(crate) trait ComputeBlock<T> {
-    fn compute(&mut self, device: &Device, queue: &Queue) -> T;
+    fn compute(&self, device: &Device, queue: &Queue) -> T;
 }
 
 pub(crate) struct ColorConverterModule {
@@ -769,7 +769,7 @@ impl<'a> ChooseCentroidModule<'a> {
 }
 
 impl<'a> ComputeBlock<()> for ChooseCentroidModule<'a> {
-    fn compute(&mut self, device: &Device, queue: &Queue) {
+    fn compute(&self, device: &Device, queue: &Queue) {
         let max_obs_chain = 32;
         let max_iteration = 128;
         let max_step_before_convergence_check = 8;
@@ -869,6 +869,199 @@ impl<'a> ComputeBlock<()> for ChooseCentroidModule<'a> {
             };
 
             self.convergence_buffer.mapped_buffer.unmap();
+        }
+    }
+}
+
+pub(crate) struct PlusPlusInitModule {
+    k: u32,
+    pipeline: ComputePipeline,
+    bind_group: BindGroup,
+    bind_groups: Vec<BindGroup>,
+    dispatch_size: u32,
+}
+
+impl PlusPlusInitModule {
+    pub(crate) fn new(
+        device: &Device,
+        image_dimensions: (u32, u32),
+        k: u32,
+        work_texture: &WorkTexture,
+        centroid_buffer: &Buffer,
+    ) -> Self {
+        const WORKGROUP_SIZE: u32 = 256;
+        const N_SEQ: u32 = 24;
+        let choose_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+            label: Some("Plus plus init shader"),
+            source: ShaderSource::Wgsl(include_str!("shaders/plus_plus_init.wgsl").into()),
+        });
+
+        let choose_centroid_bind_group_layout =
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("Choose centroid bind group 0 layout"),
+                entries: &[
+                    BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Texture {
+                            sample_type: TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let (dispatch_size, _) = compute_work_group_count(
+            (image_dimensions.0 * image_dimensions.1, 1),
+            (WORKGROUP_SIZE * N_SEQ, 1),
+        );
+        let color_buffer_size = dispatch_size * 8 * 4;
+        let color_buffer = device.create_buffer(&BufferDescriptor {
+            label: None,
+            size: color_buffer_size as BufferAddress,
+            usage: BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        let state_buffer_size = dispatch_size * 4;
+        let state_buffer = device.create_buffer(&BufferDescriptor {
+            label: None,
+            size: state_buffer_size as BufferAddress,
+            usage: BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+
+        let bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: None,
+            layout: &choose_centroid_bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: centroid_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(
+                        &work_texture.create_view(&TextureViewDescriptor::default()),
+                    ),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: color_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: state_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let k_index_buffers: Vec<Buffer> = (1..k)
+            .map(|k| {
+                device.create_buffer_init(&BufferInitDescriptor {
+                    label: None,
+                    contents: bytemuck::cast_slice(&[k]),
+                    usage: BufferUsages::UNIFORM,
+                })
+            })
+            .collect();
+
+        let k_index_bind_group_layout =
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("Choose centroid bind group 2 layout"),
+                entries: &[BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+        let bind_groups: Vec<_> = (0..k - 1)
+            .map(|k| {
+                device.create_bind_group(&BindGroupDescriptor {
+                    label: None,
+                    layout: &k_index_bind_group_layout,
+                    entries: &[BindGroupEntry {
+                        binding: 0,
+                        resource: BindingResource::Buffer(BufferBinding {
+                            buffer: &k_index_buffers[k as usize],
+                            offset: 0,
+                            size: None,
+                        }),
+                    }],
+                })
+            })
+            .collect();
+
+        let choose_centroid_pipeline_layout =
+            device.create_pipeline_layout(&PipelineLayoutDescriptor {
+                label: Some("Choose centroid pipeline layout"),
+                bind_group_layouts: &[
+                    &choose_centroid_bind_group_layout,
+                    &k_index_bind_group_layout,
+                ],
+                push_constant_ranges: &[],
+            });
+        let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("Choose centroid pipeline"),
+            layout: Some(&choose_centroid_pipeline_layout),
+            module: &choose_centroid_shader,
+            entry_point: "main",
+        });
+
+        Self {
+            k,
+            pipeline,
+            bind_group,
+            bind_groups,
+            dispatch_size,
+        }
+    }
+}
+
+impl Module for PlusPlusInitModule {
+    fn dispatch<'a>(&'a self, compute_pass: &mut ComputePass<'a>) {
+        compute_pass.set_pipeline(&self.pipeline);
+        compute_pass.set_bind_group(0, &self.bind_group, &[]);
+
+        for k in 0..self.k - 1 {
+            compute_pass.set_bind_group(1, &self.bind_groups[k as usize], &[]);
+            compute_pass.dispatch(self.dispatch_size, 1, 1);
         }
     }
 }

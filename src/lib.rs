@@ -1,7 +1,7 @@
 use anyhow::Result;
 use modules::{
     ChooseCentroidModule, ColorConverterModule, ColorReverterModule, ComputeBlock,
-    FindCentroidModule, Module, SwapModule,
+    FindCentroidModule, Module, PlusPlusInitModule, SwapModule,
 };
 use palette::{IntoColor, Lab, Pixel, Srgba};
 use pollster::FutureExt;
@@ -280,6 +280,13 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
     });
 
+    let plus_plus_init_module = PlusPlusInitModule::new(
+        &device,
+        image.dimensions,
+        k,
+        &work_texture,
+        &centroid_buffer,
+    );
     let color_converter_module = ColorConverterModule::new(
         &device,
         color_space,
@@ -301,7 +308,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         &centroid_buffer,
         &color_index_texture,
     );
-    let mut choose_centroid_module = ChooseCentroidModule::new(
+    let choose_centroid_module = ChooseCentroidModule::new(
         &device,
         color_space,
         image.dimensions,
@@ -330,6 +337,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
             label: Some("Init pass"),
         });
         color_converter_module.dispatch(&mut compute_pass);
+        plus_plus_init_module.dispatch(&mut compute_pass);
 
         find_centroid_module.dispatch(&mut compute_pass);
     }
@@ -625,7 +633,7 @@ fn init_centroids(image: &Image, k: u32, color_space: &ColorSpace) -> Vec<u8> {
     let total_px = width * height;
     let mut picked_indices = Vec::with_capacity(k as usize);
 
-    for _ in 0..k {
+    for _ in 0..1 {
         loop {
             let color_index = rng.gen_range(0..total_px);
             if !picked_indices.contains(&color_index) {
@@ -654,6 +662,12 @@ fn init_centroids(image: &Image, k: u32, color_space: &ColorSpace) -> Vec<u8> {
             })
             .collect::<Vec<f32>>(),
     ));
+    centroids.extend_from_slice(
+        &(1..k)
+            .map(|_| [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+            .flatten()
+            .collect::<Vec<u8>>(),
+    );
 
     centroids
 }
