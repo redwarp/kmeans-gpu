@@ -7,11 +7,14 @@ use wgpu::{
     BindGroupLayoutEntry, BindingResource, BindingType, Buffer, BufferAddress, BufferBinding,
     BufferBindingType, BufferDescriptor, BufferUsages, ComputePass, ComputePipeline,
     ComputePipelineDescriptor, Device, MapMode, PipelineLayoutDescriptor, Queue, ShaderSource,
-    ShaderStages, StorageTextureAccess, Texture, TextureFormat, TextureSampleType,
-    TextureViewDescriptor, TextureViewDimension,
+    ShaderStages, StorageTextureAccess, TextureFormat, TextureSampleType, TextureViewDescriptor,
+    TextureViewDimension,
 };
 
-use crate::{utils::compute_work_group_count, ColorSpace};
+use crate::{
+    utils::compute_work_group_count, ColorIndexTexture, ColorSpace, InputTexture, OutputTexture,
+    WorkTexture,
+};
 
 pub(crate) trait Module {
     fn dispatch<'a>(&'a self, compute_pass: &mut ComputePass<'a>);
@@ -32,8 +35,8 @@ impl ColorConverterModule {
         device: &Device,
         color_space: &ColorSpace,
         image_dimensions: (u32, u32),
-        input_texture: &Texture,
-        work_texture: &Texture,
+        input_texture: &InputTexture,
+        work_texture: &WorkTexture,
     ) -> Self {
         let convert_color_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
             label: Some("Convert color shader"),
@@ -151,8 +154,8 @@ impl ColorReverterModule {
         device: &Device,
         color_space: &ColorSpace,
         image_dimensions: (u32, u32),
-        work_texture: &Texture,
-        output_texture: &Texture,
+        work_texture: &WorkTexture,
+        output_texture: &OutputTexture,
     ) -> Self {
         let revert_color_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
             label: Some("Revert color shader"),
@@ -269,9 +272,9 @@ impl SwapModule {
     pub fn new(
         device: &Device,
         image_dimensions: (u32, u32),
-        work_texture: &Texture,
+        work_texture: &WorkTexture,
         centroid_buffer: &Buffer,
-        color_index_texture: &Texture,
+        color_index_texture: &ColorIndexTexture,
     ) -> Self {
         let swap_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
             label: Some("Swap colors shader"),
@@ -377,9 +380,9 @@ impl FindCentroidModule {
     pub fn new(
         device: &Device,
         image_dimensions: (u32, u32),
-        work_texture: &Texture,
+        work_texture: &WorkTexture,
         centroid_buffer: &Buffer,
-        color_index_texture: &Texture,
+        color_index_texture: &ColorIndexTexture,
     ) -> Self {
         let find_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
             label: Some("Find centroid shader"),
@@ -509,9 +512,9 @@ impl<'a> ChooseCentroidModule<'a> {
         color_space: &ColorSpace,
         image_dimensions: (u32, u32),
         k: u32,
-        work_texture: &Texture,
+        work_texture: &WorkTexture,
         centroid_buffer: &Buffer,
-        color_index_texture: &Texture,
+        color_index_texture: &ColorIndexTexture,
         find_centroid_module: &'a FindCentroidModule,
     ) -> Self {
         const WORKGROUP_SIZE: u32 = 256;

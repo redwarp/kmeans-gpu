@@ -6,13 +6,13 @@ use modules::{
 use palette::{IntoColor, Lab, Pixel, Srgba};
 use pollster::FutureExt;
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use std::vec;
+use std::{ops::Deref, vec};
 use utils::padded_bytes_per_row;
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
-    Backends, BufferAddress, BufferDescriptor, BufferUsages, CommandEncoderDescriptor,
-    ComputePassDescriptor, DeviceDescriptor, Features, ImageDataLayout, Instance, MapMode,
-    PowerPreference, QuerySetDescriptor, QueryType, RequestAdapterOptionsBase, TextureDimension,
+    Backends, BufferAddress, BufferUsages, CommandEncoderDescriptor, ComputePassDescriptor, Device,
+    DeviceDescriptor, Features, ImageDataLayout, Instance, MapMode, PowerPreference,
+    QuerySetDescriptor, QueryType, Queue, RequestAdapterOptionsBase, Texture, TextureDimension,
     TextureFormat, TextureUsages,
 };
 
@@ -81,6 +81,146 @@ impl ColorSpace {
     }
 }
 
+struct InputTexture(Texture);
+
+impl InputTexture {
+    fn new(device: &Device, queue: &Queue, image: &Image) -> Self {
+        let (width, height) = image.dimensions;
+        let texture_size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("input texture"),
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8Unorm,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+        });
+
+        queue.write_texture(
+            texture.as_image_copy(),
+            bytemuck::cast_slice(&image.rgba),
+            ImageDataLayout {
+                offset: 0,
+                bytes_per_row: std::num::NonZeroU32::new(4 * width),
+                rows_per_image: None,
+            },
+            texture_size,
+        );
+
+        Self(texture)
+    }
+}
+
+impl Deref for InputTexture {
+    type Target = Texture;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+struct WorkTexture(Texture);
+
+impl WorkTexture {
+    fn new(device: &Device, image: &Image) -> Self {
+        let (width, height) = image.dimensions;
+        let texture_size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("work texture"),
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba16Float,
+            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+        });
+
+        Self(texture)
+    }
+}
+
+impl Deref for WorkTexture {
+    type Target = Texture;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+struct ColorIndexTexture(Texture);
+
+impl ColorIndexTexture {
+    fn new(device: &Device, image: &Image) -> Self {
+        let (width, height) = image.dimensions;
+        let texture_size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Color index texture"),
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::R32Uint,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
+        });
+
+        Self(texture)
+    }
+}
+
+impl Deref for ColorIndexTexture {
+    type Target = Texture;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+struct OutputTexture(Texture);
+
+impl OutputTexture {
+    fn new(device: &Device, image: &Image) -> Self {
+        let (width, height) = image.dimensions;
+        let texture_size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("output texture"),
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8Unorm,
+            usage: TextureUsages::COPY_SRC | TextureUsages::STORAGE_BINDING,
+        });
+
+        Self(texture)
+    }
+}
+
+impl Deref for OutputTexture {
+    type Target = Texture;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> {
     let (width, height) = image.dimensions;
 
@@ -129,56 +269,10 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         depth_or_array_layers: 1,
     };
 
-    let input_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("input texture"),
-        size: texture_size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: TextureDimension::D2,
-        format: TextureFormat::Rgba8Unorm,
-        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-    });
-
-    queue.write_texture(
-        input_texture.as_image_copy(),
-        bytemuck::cast_slice(&image.rgba),
-        ImageDataLayout {
-            offset: 0,
-            bytes_per_row: std::num::NonZeroU32::new(4 * width),
-            rows_per_image: None,
-        },
-        texture_size,
-    );
-
-    let work_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("work texture"),
-        size: texture_size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: TextureDimension::D2,
-        format: TextureFormat::Rgba16Float,
-        usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-    });
-
-    let output_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("output texture"),
-        size: texture_size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: TextureDimension::D2,
-        format: TextureFormat::Rgba8Unorm,
-        usage: TextureUsages::COPY_SRC | TextureUsages::STORAGE_BINDING,
-    });
-
-    let color_index_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("Color index texture"),
-        size: texture_size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: TextureDimension::D2,
-        format: TextureFormat::R32Uint,
-        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
-    });
+    let input_texture = InputTexture::new(&device, &queue, image);
+    let work_texture = WorkTexture::new(&device, image);
+    let color_index_texture = ColorIndexTexture::new(&device, image);
+    let output_texture = OutputTexture::new(&device, image);
 
     let centroid_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label: None,
@@ -353,8 +447,6 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
 }
 
 pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u8; 4]>> {
-    let (width, height) = image.dimensions;
-
     let centroids = init_centroids(image, k, color_space);
 
     let instance = Instance::new(Backends::all());
@@ -394,52 +486,9 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
         usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
     });
 
-    let texture_size = wgpu::Extent3d {
-        width,
-        height,
-        depth_or_array_layers: 1,
-    };
-
-    let input_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("input texture"),
-        size: texture_size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: TextureDimension::D2,
-        format: TextureFormat::Rgba8Unorm,
-        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-    });
-
-    queue.write_texture(
-        input_texture.as_image_copy(),
-        bytemuck::cast_slice(&image.rgba),
-        ImageDataLayout {
-            offset: 0,
-            bytes_per_row: std::num::NonZeroU32::new(4 * width),
-            rows_per_image: None,
-        },
-        texture_size,
-    );
-
-    let work_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("work texture"),
-        size: texture_size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: TextureDimension::D2,
-        format: TextureFormat::Rgba16Float,
-        usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-    });
-
-    let color_index_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("Color index texture"),
-        size: texture_size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: TextureDimension::D2,
-        format: TextureFormat::R32Uint,
-        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
-    });
+    let input_texture = InputTexture::new(&device, &queue, image);
+    let work_texture = WorkTexture::new(&device, image);
+    let color_index_texture = ColorIndexTexture::new(&device, image);
 
     let centroid_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label: None,
