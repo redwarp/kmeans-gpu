@@ -688,8 +688,7 @@ fn init_centroids(image: &Image, k: u32, color_space: &ColorSpace) -> Vec<u8> {
     ));
     centroids.extend_from_slice(
         &(1..k)
-            .map(|_| [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-            .flatten()
+            .flat_map(|_| [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
             .collect::<Vec<u8>>(),
     );
 

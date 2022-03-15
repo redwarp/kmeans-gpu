@@ -5,10 +5,10 @@ use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, Buffer, BufferAddress, BufferBinding,
-    BufferBindingType, BufferDescriptor, BufferUsages, ComputePass, ComputePipeline,
-    ComputePipelineDescriptor, Device, MapMode, PipelineLayoutDescriptor, Queue, ShaderSource,
-    ShaderStages, StorageTextureAccess, TextureFormat, TextureSampleType, TextureViewDescriptor,
-    TextureViewDimension,
+    BufferBindingType, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, ComputePass,
+    ComputePassDescriptor, ComputePipeline, ComputePipelineDescriptor, Device, MapMode,
+    PipelineLayoutDescriptor, Queue, ShaderSource, ShaderStages, StorageTextureAccess,
+    TextureFormat, TextureSampleType, TextureViewDescriptor, TextureViewDimension,
 };
 
 use crate::{
@@ -781,9 +781,9 @@ impl<'a> ComputeBlock<()> for ChooseCentroidModule<'a> {
         'iteration: loop {
             op_count = 0;
             let mut encoder =
-                device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                device.create_command_encoder(&CommandEncoderDescriptor { label: None });
 
-            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
                 label: Some("Choose centroid pass"),
             });
             compute_pass.set_pipeline(&self.pipeline);
@@ -1055,16 +1055,17 @@ impl PlusPlusInitModule {
 }
 
 impl ComputeBlock<()> for PlusPlusInitModule {
-    fn compute(&self, device: &Device, queue: &Queue) -> () {
+    fn compute(&self, device: &Device, queue: &Queue) {
         let max_obs_chain = 32;
         let mut op_count;
         let mut current_k = 0;
+        let mut finish = false;
 
         'iteration: loop {
             op_count = 0;
             let mut encoder =
-                device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                device.create_command_encoder(&CommandEncoderDescriptor { label: None });
+            let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
                 label: Some("Plus plus init pass"),
             });
             compute_pass.set_pipeline(&self.pipeline);
@@ -1076,22 +1077,22 @@ impl ComputeBlock<()> for PlusPlusInitModule {
                 op_count += 1;
 
                 if k >= self.k - 2 {
-                    drop(compute_pass);
-                    queue.submit(Some(encoder.finish()));
-                    break 'iteration;
+                    finish = true;
                 }
 
                 #[allow(clippy::mut_range_bound)]
                 if op_count >= max_obs_chain {
                     current_k = k + 1;
-                    drop(compute_pass);
-                    queue.submit(Some(encoder.finish()));
-                    continue 'iteration;
+                    break;
                 }
             }
 
             drop(compute_pass);
             queue.submit(Some(encoder.finish()));
+
+            if finish {
+                break 'iteration;
+            }
         }
     }
 }
