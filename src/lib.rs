@@ -337,8 +337,16 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
             label: Some("Init pass"),
         });
         color_converter_module.dispatch(&mut compute_pass);
-        plus_plus_init_module.dispatch(&mut compute_pass);
+    }
+    queue.submit(Some(encoder.finish()));
 
+    plus_plus_init_module.compute(&device, &queue);
+
+    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
+    {
+        let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+            label: Some("Init pass"),
+        });
         find_centroid_module.dispatch(&mut compute_pass);
     }
 
@@ -504,6 +512,13 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
         usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
     });
 
+    let plus_plus_init_module = PlusPlusInitModule::new(
+        &device,
+        image.dimensions,
+        k,
+        &work_texture,
+        &centroid_buffer,
+    );
     let color_converter_module = ColorConverterModule::new(
         &device,
         color_space,
@@ -518,7 +533,7 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
         &centroid_buffer,
         &color_index_texture,
     );
-    let mut choose_centroid_module = ChooseCentroidModule::new(
+    let choose_centroid_module = ChooseCentroidModule::new(
         &device,
         color_space,
         image.dimensions,
@@ -539,7 +554,16 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
             label: Some("Init pass"),
         });
         color_converter_module.dispatch(&mut compute_pass);
+    }
+    queue.submit(Some(encoder.finish()));
 
+    plus_plus_init_module.compute(&device, &queue);
+
+    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
+    {
+        let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+            label: Some("Init pass"),
+        });
         find_centroid_module.dispatch(&mut compute_pass);
     }
 

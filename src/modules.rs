@@ -1054,14 +1054,44 @@ impl PlusPlusInitModule {
     }
 }
 
-impl Module for PlusPlusInitModule {
-    fn dispatch<'a>(&'a self, compute_pass: &mut ComputePass<'a>) {
-        compute_pass.set_pipeline(&self.pipeline);
-        compute_pass.set_bind_group(0, &self.bind_group, &[]);
+impl ComputeBlock<()> for PlusPlusInitModule {
+    fn compute(&self, device: &Device, queue: &Queue) -> () {
+        let max_obs_chain = 32;
+        let mut op_count;
+        let mut current_k = 0;
 
-        for k in 0..self.k - 1 {
-            compute_pass.set_bind_group(1, &self.bind_groups[k as usize], &[]);
-            compute_pass.dispatch(self.dispatch_size, 1, 1);
+        'iteration: loop {
+            op_count = 0;
+            let mut encoder =
+                device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Plus plus init pass"),
+            });
+            compute_pass.set_pipeline(&self.pipeline);
+            compute_pass.set_bind_group(0, &self.bind_group, &[]);
+            #[allow(clippy::mut_range_bound)]
+            for k in current_k..self.k - 1 {
+                compute_pass.set_bind_group(1, &self.bind_groups[k as usize], &[]);
+                compute_pass.dispatch(self.dispatch_size, 1, 1);
+                op_count += 1;
+
+                if k >= self.k - 2 {
+                    drop(compute_pass);
+                    queue.submit(Some(encoder.finish()));
+                    break 'iteration;
+                }
+
+                #[allow(clippy::mut_range_bound)]
+                if op_count >= max_obs_chain {
+                    current_k = k + 1;
+                    drop(compute_pass);
+                    queue.submit(Some(encoder.finish()));
+                    continue 'iteration;
+                }
+            }
+
+            drop(compute_pass);
+            queue.submit(Some(encoder.finish()));
         }
     }
 }
