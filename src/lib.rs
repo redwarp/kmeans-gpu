@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use log::{debug, log_enabled};
 use modules::{
     ChooseCentroidModule, ColorConverterModule, ColorReverterModule, ComputeBlock,
@@ -6,7 +6,7 @@ use modules::{
 };
 use palette::{IntoColor, Lab, Pixel, Srgba};
 use pollster::FutureExt;
-use std::{ops::Deref, vec};
+use std::{fmt::Display, ops::Deref, str::FromStr, vec};
 use utils::padded_bytes_per_row;
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
@@ -78,6 +78,24 @@ impl ColorSpace {
             ColorSpace::Lab => 0.75,
             ColorSpace::Rgb => 0.01,
         }
+    }
+}
+
+impl FromStr for ColorSpace {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "lab" => Ok(ColorSpace::Lab),
+            "rgb" => Ok(ColorSpace::Rgb),
+            _ => Err(anyhow!("Unsupported color space {s}")),
+        }
+    }
+}
+
+impl Display for ColorSpace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
     }
 }
 

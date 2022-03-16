@@ -1,0 +1,107 @@
+use std::fmt::Display;
+use std::path::PathBuf;
+use std::str::FromStr;
+
+use anyhow::anyhow;
+use anyhow::Result;
+use clap::{Parser, Subcommand};
+use k_means_gpu::ColorSpace;
+
+#[derive(Parser)]
+#[clap(author, version, about, long_about = None)]
+#[clap(propagate_version = true)]
+pub struct Cli {
+    #[clap(subcommand)]
+    pub commands: Commands,
+}
+
+#[derive(Subcommand)]
+pub enum Commands {
+    /// Create an image quantized with kmeans
+    Kmeans {
+        /// K value, aka the number of colors we want to extract
+        #[clap(short, validator = validate_k)]
+        k: u32,
+        /// Input file
+        #[clap(short, long, validator = validate_filenames, parse(from_os_str))]
+        input: PathBuf,
+        /// Optional output file
+        #[clap(short, long, parse(from_os_str))]
+        output: Option<PathBuf>,
+        /// Optional extension to use if an output file is not specified
+        #[clap(short, long)]
+        extension: Option<Extension>,
+        /// The colorspace to use when clustering colors. Lab gives more natural colors
+        #[clap(short, long="colorspace", default_value_t=ColorSpace::Lab)]
+        color_space: ColorSpace,
+    },
+    /// Output the palette calculated with k-means
+    Palette {
+        /// K value, aka the number of colors we want to extract
+        #[clap(short, validator = validate_k)]
+        k: u32,
+        /// Input file
+        #[clap(short, long, validator = validate_filenames, parse(from_os_str))]
+        input: PathBuf,
+        /// Optional output file
+        #[clap(short, long, parse(from_os_str))]
+        output: Option<PathBuf>,
+        /// The colorspace to use when clustering colors. Lab gives more natural colors
+        #[clap(short, long="colorspace", default_value_t=ColorSpace::Lab)]
+        color_space: ColorSpace,
+    },
+}
+
+#[derive(Debug)]
+pub enum Extension {
+    Png,
+    Jpg,
+}
+
+impl Extension {
+    pub fn value(&self) -> &'static str {
+        match self {
+            Extension::Png => "png",
+            Extension::Jpg => "jpg",
+        }
+    }
+}
+
+impl FromStr for Extension {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "png" => Ok(Extension::Png),
+            "jpg" => Ok(Extension::Jpg),
+            _ => Err(anyhow!("Unsupported extension {s}")),
+        }
+    }
+}
+
+impl Display for Extension {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.value())
+    }
+}
+
+fn validate_k(s: &str) -> Result<()> {
+    match s.parse::<u32>() {
+        Ok(k) => {
+            if k >= 1 {
+                Ok(())
+            } else {
+                Err(anyhow!("k must be an integer higher than 0."))
+            }
+        }
+        Err(_) => Err(anyhow!("k must be an integer higher than 0.")),
+    }
+}
+
+fn validate_filenames(s: &str) -> Result<()> {
+    if s.ends_with(".png") || s.ends_with(".jpg") {
+        Ok(())
+    } else {
+        Err(anyhow!("Only support png or jpg files."))
+    }
+}
