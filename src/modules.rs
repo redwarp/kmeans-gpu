@@ -39,7 +39,7 @@ impl ColorConverterModule {
             source: ShaderSource::Wgsl(
                 match color_space {
                     ColorSpace::Lab => include_str!("shaders/converters/rgb_to_lab.wgsl"),
-                    ColorSpace::Rgb => include_str!("shaders/converters/rgb8u_to_rgb32f.wgsl"),
+                    ColorSpace::Rgb => include_str!("shaders/converters/rgb8u_to_rgb16f.wgsl"),
                 }
                 .into(),
             ),
