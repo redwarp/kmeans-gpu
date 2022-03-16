@@ -9,6 +9,7 @@ use args::{Cli, Commands, Extension};
 use clap::Parser;
 use image::{ImageBuffer, Rgba};
 use k_means_gpu::{find, kmeans, palette, ColorSpace, Image};
+use pollster::FutureExt;
 
 mod args;
 
@@ -24,25 +25,25 @@ fn main() -> Result<()> {
             output,
             extension,
             color_space,
-        } => kmeans_subcommand(k, input, output, extension, color_space),
+        } => kmeans_subcommand(k, input, output, extension, color_space).block_on(),
         Commands::Palette {
             k,
             input,
             output,
             color_space,
-        } => palette_subcommand(k, input, output, color_space),
+        } => palette_subcommand(k, input, output, color_space).block_on(),
         Commands::Find {
             input,
             output,
             replacement,
             color_space,
-        } => find_subcommand(input, output, replacement, color_space),
+        } => find_subcommand(input, output, replacement, color_space).block_on(),
     }?;
 
     Ok(())
 }
 
-fn kmeans_subcommand(
+async fn kmeans_subcommand(
     k: u32,
     input: PathBuf,
     output: Option<PathBuf>,
@@ -51,7 +52,7 @@ fn kmeans_subcommand(
 ) -> Result<()> {
     let image = Image::open(&input)?;
 
-    let result = kmeans(k, &image, &color_space)?;
+    let result = kmeans(k, &image, &color_space).await?;
     let (width, height) = result.dimensions();
 
     if let Some(output_image) =
@@ -64,7 +65,7 @@ fn kmeans_subcommand(
     Ok(())
 }
 
-fn palette_subcommand(
+async fn palette_subcommand(
     k: u32,
     input: PathBuf,
     output: Option<PathBuf>,
@@ -72,7 +73,7 @@ fn palette_subcommand(
 ) -> Result<()> {
     let image = Image::open(&input)?;
 
-    let result = palette(k, &image, &color_space)?;
+    let result = palette(k, &image, &color_space).await?;
 
     let path = palette_file(k, &input, &output, &color_space)?;
     save_palette(path, &result)?;
@@ -88,7 +89,7 @@ fn palette_subcommand(
     Ok(())
 }
 
-fn find_subcommand(
+async fn find_subcommand(
     input: PathBuf,
     output: Option<PathBuf>,
     replacement: String,
@@ -98,7 +99,7 @@ fn find_subcommand(
 
     let image = Image::open(&input)?;
 
-    let result = find(&image, &colors, &color_space)?;
+    let result = find(&image, &colors, &color_space).await?;
 
     let (width, height) = result.dimensions();
 

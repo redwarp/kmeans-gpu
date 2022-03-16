@@ -1,7 +1,6 @@
 use std::num::NonZeroU32;
 
 use log::{debug, log_enabled};
-use pollster::FutureExt;
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
@@ -19,10 +18,6 @@ use crate::{
 
 pub(crate) trait Module {
     fn dispatch<'a>(&'a self, compute_pass: &mut ComputePass<'a>);
-}
-
-pub(crate) trait ComputeBlock<T> {
-    fn compute(&self, device: &Device, queue: &Queue) -> T;
 }
 
 pub(crate) struct ColorConverterModule {
@@ -767,10 +762,8 @@ impl<'a> ChooseCentroidModule<'a> {
             find_centroid_module,
         }
     }
-}
 
-impl<'a> ComputeBlock<()> for ChooseCentroidModule<'a> {
-    fn compute(&self, device: &Device, queue: &Queue) {
+    pub(crate) async fn compute(&self, device: &Device, queue: &Queue) {
         let max_obs_chain = 32;
         let max_iteration = 128;
         let max_step_before_convergence_check = 8;
@@ -854,7 +847,7 @@ impl<'a> ComputeBlock<()> for ChooseCentroidModule<'a> {
 
             device.poll(wgpu::Maintain::Wait);
 
-            match check_convergence_future.block_on() {
+            match check_convergence_future.await {
                 Ok(_) => {
                     let convergence_data = bytemuck::cast_slice::<u8, u32>(
                         &check_convergence_slice.get_mapped_range(),
@@ -895,10 +888,8 @@ impl<'a> PlusPlusInitModule<'a> {
             work_texture,
         }
     }
-}
 
-impl<'a> ComputeBlock<()> for PlusPlusInitModule<'a> {
-    fn compute(&self, device: &Device, queue: &Queue) {
+    pub(crate) async fn compute(&self, device: &Device, queue: &Queue) {
         const WORKGROUP_SIZE: u32 = 256;
         const N_SEQ: u32 = 24;
         const MAX_OPERATIONS_CHAIN: usize = 32;
@@ -1105,7 +1096,7 @@ impl<'a> ComputeBlock<()> for PlusPlusInitModule<'a> {
 
             device.poll(wgpu::Maintain::Wait);
 
-            if let Ok(()) = cent_buffer_future.block_on() {
+            if let Ok(()) = cent_buffer_future.await {
                 let data = cent_buffer_slice.get_mapped_range();
 
                 for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[16..])

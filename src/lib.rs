@@ -1,11 +1,10 @@
 use anyhow::{anyhow, Result};
 use log::{debug, log_enabled};
 use modules::{
-    ChooseCentroidModule, ColorConverterModule, ColorReverterModule, ComputeBlock,
-    FindCentroidModule, Module, PlusPlusInitModule, SwapModule,
+    ChooseCentroidModule, ColorConverterModule, ColorReverterModule, FindCentroidModule, Module,
+    PlusPlusInitModule, SwapModule,
 };
 use palette::{IntoColor, Lab, Pixel, Srgb, Srgba};
-use pollster::FutureExt;
 use std::{fmt::Display, ops::Deref, str::FromStr, vec};
 use utils::padded_bytes_per_row;
 use wgpu::{
@@ -239,7 +238,7 @@ impl Deref for OutputTexture {
     }
 }
 
-pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> {
+pub async fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> {
     let (width, height) = image.dimensions;
 
     let centroids = empty_centroids(k);
@@ -251,7 +250,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
             force_fallback_adapter: false,
             compatible_surface: None,
         })
-        .block_on()
+        .await
         .ok_or_else(|| anyhow::anyhow!("Couldn't create the adapter"))?;
 
     let features = adapter.features();
@@ -264,7 +263,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
             },
             None,
         )
-        .block_on()?;
+        .await?;
 
     let query_set = if features.contains(Features::TIMESTAMP_QUERY) {
         Some(device.create_query_set(&QuerySetDescriptor {
@@ -353,7 +352,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
     }
     queue.submit(Some(encoder.finish()));
 
-    plus_plus_init_module.compute(&device, &queue);
+    plus_plus_init_module.compute(&device, &queue).await;
 
     let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
     {
@@ -365,7 +364,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
 
     queue.submit(Some(encoder.finish()));
 
-    choose_centroid_module.compute(&device, &queue);
+    choose_centroid_module.compute(&device, &queue).await;
 
     let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
     {
@@ -435,7 +434,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
 
     device.poll(wgpu::Maintain::Wait);
 
-    if let Ok(()) = cent_buffer_future.block_on() {
+    if let Ok(()) = cent_buffer_future.await {
         let data = cent_buffer_slice.get_mapped_range();
         if log_enabled!(log::Level::Debug) {
             for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[16..])
@@ -447,7 +446,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         }
     }
 
-    if query_future.block_on().is_ok() && features.contains(Features::TIMESTAMP_QUERY) {
+    if query_future.await.is_ok() && features.contains(Features::TIMESTAMP_QUERY) {
         let ts_period = queue.get_timestamp_period();
         let ts_data_raw = &*query_slice.get_mapped_range();
         let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
@@ -457,7 +456,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         );
     }
 
-    match buffer_future.block_on() {
+    match buffer_future.await {
         Ok(()) => {
             let padded_data = buffer_slice.get_mapped_range();
             let mut pixels: Vec<u8> = vec![0; unpadded_bytes_per_row * height as usize];
@@ -476,7 +475,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
     }
 }
 
-pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u8; 4]>> {
+pub async fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u8; 4]>> {
     let centroids = empty_centroids(k);
 
     let instance = Instance::new(Backends::all());
@@ -486,7 +485,7 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
             force_fallback_adapter: false,
             compatible_surface: None,
         })
-        .block_on()
+        .await
         .ok_or_else(|| anyhow::anyhow!("Couldn't create the adapter"))?;
 
     let features = adapter.features();
@@ -499,7 +498,7 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
             },
             None,
         )
-        .block_on()?;
+        .await?;
 
     let query_set = if features.contains(Features::TIMESTAMP_QUERY) {
         Some(device.create_query_set(&QuerySetDescriptor {
@@ -566,7 +565,7 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
     }
     queue.submit(Some(encoder.finish()));
 
-    plus_plus_init_module.compute(&device, &queue);
+    plus_plus_init_module.compute(&device, &queue).await;
 
     let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
     {
@@ -578,7 +577,7 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
 
     queue.submit(Some(encoder.finish()));
 
-    choose_centroid_module.compute(&device, &queue);
+    choose_centroid_module.compute(&device, &queue).await;
 
     let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
     if let Some(query_set) = &query_set {
@@ -608,7 +607,7 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
 
     device.poll(wgpu::Maintain::Wait);
 
-    if query_future.block_on().is_ok() && features.contains(Features::TIMESTAMP_QUERY) {
+    if query_future.await.is_ok() && features.contains(Features::TIMESTAMP_QUERY) {
         let ts_period = queue.get_timestamp_period();
         let ts_data_raw = &*query_slice.get_mapped_range();
         let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
@@ -618,7 +617,7 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
         );
     }
 
-    match cent_buffer_future.block_on() {
+    match cent_buffer_future.await {
         Ok(()) => {
             let data = cent_buffer_slice.get_mapped_range();
 
@@ -657,7 +656,7 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
     }
 }
 
-pub fn find(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -> Result<Image> {
+pub async fn find(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -> Result<Image> {
     let (width, height) = image.dimensions;
 
     let centroids = fixed_centroids(colors, color_space);
@@ -669,7 +668,7 @@ pub fn find(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -> Resu
             force_fallback_adapter: false,
             compatible_surface: None,
         })
-        .block_on()
+        .await
         .ok_or_else(|| anyhow::anyhow!("Couldn't create the adapter"))?;
 
     let features = adapter.features();
@@ -682,7 +681,7 @@ pub fn find(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -> Resu
             },
             None,
         )
-        .block_on()?;
+        .await?;
 
     let query_set = if features.contains(Features::TIMESTAMP_QUERY) {
         Some(device.create_query_set(&QuerySetDescriptor {
@@ -820,7 +819,7 @@ pub fn find(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -> Resu
 
     device.poll(wgpu::Maintain::Wait);
 
-    if let Ok(()) = cent_buffer_future.block_on() {
+    if let Ok(()) = cent_buffer_future.await {
         let data = cent_buffer_slice.get_mapped_range();
         if log_enabled!(log::Level::Debug) {
             for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[16..])
@@ -832,7 +831,7 @@ pub fn find(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -> Resu
         }
     }
 
-    if query_future.block_on().is_ok() && features.contains(Features::TIMESTAMP_QUERY) {
+    if query_future.await.is_ok() && features.contains(Features::TIMESTAMP_QUERY) {
         let ts_period = queue.get_timestamp_period();
         let ts_data_raw = &*query_slice.get_mapped_range();
         let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
@@ -842,7 +841,7 @@ pub fn find(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -> Resu
         );
     }
 
-    match buffer_future.block_on() {
+    match buffer_future.await {
         Ok(()) => {
             let padded_data = buffer_slice.get_mapped_range();
             let mut pixels: Vec<u8> = vec![0; unpadded_bytes_per_row * height as usize];
