@@ -10,6 +10,8 @@ use image::{ImageBuffer, Rgba};
 use k_means_gpu::{kmeans, palette, ColorSpace, Image};
 
 fn main() -> Result<()> {
+    env_logger::init();
+
     let matches = command!()
     .subcommand(Command::new("kmeans")
         .arg(
@@ -140,7 +142,7 @@ fn palette_subcommand(matches: &ArgMatches) -> Result<()> {
         .into_iter()
         .map(|color| format!("#{:02X}{:02X}{:02X}", color[0], color[1], color[2]))
         .collect::<Vec<_>>()
-        .join(", ");
+        .join(",");
 
     println!("Palette: {colors}");
 

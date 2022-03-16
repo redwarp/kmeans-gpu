@@ -1,11 +1,11 @@
 use anyhow::Result;
+use log::{debug, log_enabled};
 use modules::{
     ChooseCentroidModule, ColorConverterModule, ColorReverterModule, ComputeBlock,
     FindCentroidModule, Module, PlusPlusInitModule, SwapModule,
 };
 use palette::{IntoColor, Lab, Pixel, Srgba};
 use pollster::FutureExt;
-use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::{ops::Deref, vec};
 use utils::padded_bytes_per_row;
 use wgpu::{
@@ -224,7 +224,7 @@ impl Deref for OutputTexture {
 pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> {
     let (width, height) = image.dimensions;
 
-    let centroids = init_centroids(image, k, color_space);
+    let centroids = init_centroids(k);
 
     let instance = Instance::new(Backends::all());
     let adapter = instance
@@ -280,13 +280,8 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
         usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
     });
 
-    let plus_plus_init_module = PlusPlusInitModule::new(
-        &device,
-        image.dimensions,
-        k,
-        &work_texture,
-        &centroid_buffer,
-    );
+    let plus_plus_init_module =
+        PlusPlusInitModule::new(image.dimensions, k, &work_texture, &centroid_buffer);
     let color_converter_module = ColorConverterModule::new(
         &device,
         color_space,
@@ -424,12 +419,13 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
 
     if let Ok(()) = cent_buffer_future.block_on() {
         let data = cent_buffer_slice.get_mapped_range();
-
-        for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[16..])
-            .chunks_exact(4)
-            .enumerate()
-        {
-            println!("Centroid {index} = {k:?}")
+        if log_enabled!(log::Level::Debug) {
+            for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[16..])
+                .chunks_exact(4)
+                .enumerate()
+            {
+                debug!("Centroid {index} = {k:?}")
+            }
         }
     }
 
@@ -463,7 +459,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
 }
 
 pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u8; 4]>> {
-    let centroids = init_centroids(image, k, color_space);
+    let centroids = init_centroids(k);
 
     let instance = Instance::new(Backends::all());
     let adapter = instance
@@ -512,13 +508,8 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
         usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
     });
 
-    let plus_plus_init_module = PlusPlusInitModule::new(
-        &device,
-        image.dimensions,
-        k,
-        &work_texture,
-        &centroid_buffer,
-    );
+    let plus_plus_init_module =
+        PlusPlusInitModule::new(image.dimensions, k, &work_texture, &centroid_buffer);
     let color_converter_module = ColorConverterModule::new(
         &device,
         color_space,
@@ -613,11 +604,13 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
         Ok(()) => {
             let data = cent_buffer_slice.get_mapped_range();
 
-            for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[16..])
-                .chunks_exact(4)
-                .enumerate()
-            {
-                println!("Centroid {index} = {k:?}")
+            if log_enabled!(log::Level::Debug) {
+                for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[16..])
+                    .chunks_exact(4)
+                    .enumerate()
+                {
+                    debug!("Centroid {index} = {k:?}")
+                }
             }
             let mut colors: Vec<_> = bytemuck::cast_slice::<u8, f32>(&data[16..])
                 .chunks_exact(4)
@@ -646,48 +639,13 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
     }
 }
 
-fn init_centroids(image: &Image, k: u32, color_space: &ColorSpace) -> Vec<u8> {
+fn init_centroids(k: u32) -> Vec<u8> {
     let mut centroids: Vec<u8> = vec![];
     // Aligned 16, see https://www.w3.org/TR/WGSL/#address-space-layout-constraints
     centroids.extend_from_slice(bytemuck::cast_slice(&[k, 0, 0, 0]));
 
-    let mut rng = StdRng::seed_from_u64(42);
-
-    let (width, height) = image.dimensions;
-    let total_px = width * height;
-    let mut picked_indices = Vec::with_capacity(k as usize);
-
-    for _ in 0..1 {
-        loop {
-            let color_index = rng.gen_range(0..total_px);
-            if !picked_indices.contains(&color_index) {
-                picked_indices.push(color_index);
-                break;
-            }
-        }
-    }
-
-    centroids.extend_from_slice(bytemuck::cast_slice(
-        &picked_indices
-            .into_iter()
-            .flat_map(|color_index| {
-                let x = color_index % width;
-                let y = color_index / width;
-                let pixel = image.get_pixel(x, y);
-                match color_space {
-                    ColorSpace::Lab => {
-                        let lab: Lab = Srgba::new(pixel[0], pixel[1], pixel[2], pixel[3])
-                            .into_format::<_, f32>()
-                            .into_color();
-                        [lab.l, lab.a, lab.b, 1.0]
-                    }
-                    ColorSpace::Rgb => pixel.map(|component| component as f32 / 255.0),
-                }
-            })
-            .collect::<Vec<f32>>(),
-    ));
     centroids.extend_from_slice(
-        &(1..k)
+        &(0..k)
             .flat_map(|_| [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
             .collect::<Vec<u8>>(),
     );

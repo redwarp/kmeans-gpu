@@ -21,3 +21,5 @@ pollster = "0.2"
 rand = "0.8"
 clap = { version = "3.0", features = ["cargo"] }
 palette = "0.6"
+log = "0.4"
+env_logger = "0.9"

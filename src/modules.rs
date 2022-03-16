@@ -1,5 +1,6 @@
 use std::num::NonZeroU32;
 
+use log::{debug, log_enabled};
 use pollster::FutureExt;
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
@@ -875,23 +876,33 @@ impl<'a> ComputeBlock<()> for ChooseCentroidModule<'a> {
 
 pub(crate) struct PlusPlusInitModule<'a> {
     k: u32,
-    pipeline: ComputePipeline,
-    bind_group: BindGroup,
-    bind_groups: Vec<BindGroup>,
-    dispatch_size: u32,
+    image_dimensions: (u32, u32),
     centroid_buffer: &'a Buffer,
+    work_texture: &'a WorkTexture,
 }
 
 impl<'a> PlusPlusInitModule<'a> {
     pub(crate) fn new(
-        device: &Device,
         image_dimensions: (u32, u32),
         k: u32,
-        work_texture: &WorkTexture,
+        work_texture: &'a WorkTexture,
         centroid_buffer: &'a Buffer,
     ) -> Self {
+        Self {
+            k,
+            image_dimensions,
+            centroid_buffer,
+            work_texture,
+        }
+    }
+}
+
+impl<'a> ComputeBlock<()> for PlusPlusInitModule<'a> {
+    fn compute(&self, device: &Device, queue: &Queue) {
         const WORKGROUP_SIZE: u32 = 256;
         const N_SEQ: u32 = 24;
+        const MAX_OPERATIONS_CHAIN: usize = 32;
+
         let choose_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
             label: Some("Plus plus init shader"),
             source: ShaderSource::Wgsl(include_str!("shaders/plus_plus_init.wgsl").into()),
@@ -945,7 +956,7 @@ impl<'a> PlusPlusInitModule<'a> {
             });
 
         let (dispatch_size, _) = compute_work_group_count(
-            (image_dimensions.0 * image_dimensions.1, 1),
+            (self.image_dimensions.0 * self.image_dimensions.1, 1),
             (WORKGROUP_SIZE * N_SEQ, 1),
         );
         let prefix_buffer_size = dispatch_size * 4 * 4;
@@ -969,12 +980,14 @@ impl<'a> PlusPlusInitModule<'a> {
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: centroid_buffer.as_entire_binding(),
+                    resource: self.centroid_buffer.as_entire_binding(),
                 },
                 BindGroupEntry {
                     binding: 1,
                     resource: BindingResource::TextureView(
-                        &work_texture.create_view(&TextureViewDescriptor::default()),
+                        &self
+                            .work_texture
+                            .create_view(&TextureViewDescriptor::default()),
                     ),
                 },
                 BindGroupEntry {
@@ -988,7 +1001,7 @@ impl<'a> PlusPlusInitModule<'a> {
             ],
         });
 
-        let k_index_buffers: Vec<Buffer> = (1..k)
+        let k_index_buffers: Vec<Buffer> = (0..self.k)
             .map(|k| {
                 device.create_buffer_init(&BufferInitDescriptor {
                     label: None,
@@ -1012,7 +1025,7 @@ impl<'a> PlusPlusInitModule<'a> {
                     count: None,
                 }],
             });
-        let bind_groups: Vec<_> = (0..k - 1)
+        let bind_groups: Vec<_> = (0..self.k)
             .map(|k| {
                 device.create_bind_group(&BindGroupDescriptor {
                     label: None,
@@ -1045,19 +1058,6 @@ impl<'a> PlusPlusInitModule<'a> {
             entry_point: "main",
         });
 
-        Self {
-            k,
-            pipeline,
-            bind_group,
-            bind_groups,
-            dispatch_size,
-            centroid_buffer,
-        }
-    }
-}
-
-impl<'a> ComputeBlock<()> for PlusPlusInitModule<'a> {
-    fn compute(&self, device: &Device, queue: &Queue) {
         let centroid_size = (self.k as u64 + 1) * 16;
         let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
@@ -1066,10 +1066,8 @@ impl<'a> ComputeBlock<()> for PlusPlusInitModule<'a> {
             mapped_at_creation: false,
         });
 
-        let max_obs_chain = 32;
-
-        for k_start in (0..self.k as usize - 1).step_by(max_obs_chain) {
-            let max_k = (k_start + max_obs_chain).min(self.k as usize - 1);
+        for k_start in (0..self.k as usize).step_by(MAX_OPERATIONS_CHAIN) {
+            let max_k = (k_start + MAX_OPERATIONS_CHAIN).min(self.k as usize);
 
             let mut encoder =
                 device.create_command_encoder(&CommandEncoderDescriptor { label: None });
@@ -1077,11 +1075,11 @@ impl<'a> ComputeBlock<()> for PlusPlusInitModule<'a> {
                 let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
                     label: Some("Plus plus init pass"),
                 });
-                compute_pass.set_pipeline(&self.pipeline);
-                compute_pass.set_bind_group(0, &self.bind_group, &[]);
+                compute_pass.set_pipeline(&pipeline);
+                compute_pass.set_bind_group(0, &bind_group, &[]);
                 for k in k_start..max_k {
-                    compute_pass.set_bind_group(1, &self.bind_groups[k as usize], &[]);
-                    compute_pass.dispatch(self.dispatch_size, 1, 1);
+                    compute_pass.set_bind_group(1, &bind_groups[k as usize], &[]);
+                    compute_pass.dispatch(dispatch_size, 1, 1);
                 }
             }
 
@@ -1089,27 +1087,36 @@ impl<'a> ComputeBlock<()> for PlusPlusInitModule<'a> {
             device.poll(wgpu::Maintain::Wait);
         }
 
-        // let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
-        // encoder.copy_buffer_to_buffer(&self.centroid_buffer, 0, &staging_buffer, 0, centroid_size);
+        if log_enabled!(log::Level::Debug) {
+            debug!("Initial centroids:");
+            let mut encoder =
+                device.create_command_encoder(&CommandEncoderDescriptor { label: None });
+            encoder.copy_buffer_to_buffer(
+                self.centroid_buffer,
+                0,
+                &staging_buffer,
+                0,
+                centroid_size,
+            );
 
-        // queue.submit(Some(encoder.finish()));
-        // let cent_buffer_slice = staging_buffer.slice(..);
-        // let cent_buffer_future = cent_buffer_slice.map_async(MapMode::Read);
+            queue.submit(Some(encoder.finish()));
+            let cent_buffer_slice = staging_buffer.slice(..);
+            let cent_buffer_future = cent_buffer_slice.map_async(MapMode::Read);
 
-        // device.poll(wgpu::Maintain::Wait);
+            device.poll(wgpu::Maintain::Wait);
 
-        // if let Ok(()) = cent_buffer_future.block_on() {
-        //     let data = cent_buffer_slice.get_mapped_range();
+            if let Ok(()) = cent_buffer_future.block_on() {
+                let data = cent_buffer_slice.get_mapped_range();
 
-        //     for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[16..])
-        //         .chunks_exact(4)
-        //         .enumerate()
-        //     {
-        //         println!("Centroid {index} = {k:?}")
-        //     }
-        //     // println!();
-        // }
+                for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[16..])
+                    .chunks_exact(4)
+                    .enumerate()
+                {
+                    debug!("Centroid {index} = {k:?}")
+                }
+            }
 
-        // staging_buffer.unmap();
+            staging_buffer.unmap();
+        }
     }
 }
