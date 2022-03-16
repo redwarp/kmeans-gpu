@@ -39,7 +39,7 @@
         }
       },
       "args": [
-        "replace",
+        "find",
         "-i",
         "./gfx/tokyo.png",
         "-r",

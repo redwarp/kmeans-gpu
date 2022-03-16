@@ -657,7 +657,7 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
     }
 }
 
-pub fn replace(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -> Result<Image> {
+pub fn find(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -> Result<Image> {
     let (width, height) = image.dimensions;
 
     let centroids = fixed_centroids(colors, color_space);

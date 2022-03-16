@@ -32,13 +32,13 @@ cargo run --release -- palette -i .\gfx\tokyo.png -k 6
 
 ![Tokyo palette with k=6](gfx/tokyo-palette-lab-k6.png)
 
-### Replace its colors:
+### Find colors and use them as replacement
 
 ```sh
-cargo run --release -- replace -i .\gfx\tokyo.png -r "#050505,#ffffff,#ff0000"
+cargo run --release -- find -i .\gfx\tokyo.png -r "#050505,#ffffff,#ff0000"
 ```
 
-![Tokyo with replaced colors](gfx/tokyo-replace-lab-dark-white-red.png)
+![Tokyo with looked up colors](gfx/tokyo-find-lab-dark-white-red.png)
 
 ## Sources
 

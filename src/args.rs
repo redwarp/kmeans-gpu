@@ -51,8 +51,8 @@ pub enum Commands {
         #[clap(short, long="colorspace", default_value_t=ColorSpace::Lab)]
         color_space: ColorSpace,
     },
-    /// Replace colors in image
-    Replace {
+    /// Find colors in image that are closest to the replacements, and swap them
+    Find {
         /// Input file
         #[clap(short, long, validator = validate_filenames, parse(from_os_str))]
         input: PathBuf,
@@ -128,7 +128,7 @@ fn validate_replacement(s: &str) -> Result<()> {
         Ok(())
     } else {
         Err(anyhow!(
-            "Replacement color should be chained like #ffaa12,#fe7845,#aabbff"
+            "Replacement colors should be chained like #ffaa12,#fe7845,#aabbff"
         ))
     }
 }

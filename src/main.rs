@@ -8,7 +8,7 @@ use anyhow::{Ok, Result};
 use args::{Cli, Commands, Extension};
 use clap::Parser;
 use image::{ImageBuffer, Rgba};
-use k_means_gpu::{kmeans, palette, replace, ColorSpace, Image};
+use k_means_gpu::{find, kmeans, palette, ColorSpace, Image};
 
 mod args;
 
@@ -31,12 +31,12 @@ fn main() -> Result<()> {
             output,
             color_space,
         } => palette_subcommand(k, input, output, color_space),
-        Commands::Replace {
+        Commands::Find {
             input,
             output,
             replacement,
             color_space,
-        } => replace_subcommand(input, output, replacement, color_space),
+        } => find_subcommand(input, output, replacement, color_space),
     }?;
 
     Ok(())
@@ -88,7 +88,7 @@ fn palette_subcommand(
     Ok(())
 }
 
-fn replace_subcommand(
+fn find_subcommand(
     input: PathBuf,
     output: Option<PathBuf>,
     replacement: String,
@@ -98,14 +98,14 @@ fn replace_subcommand(
 
     let image = Image::open(&input)?;
 
-    let result = replace(&image, &colors, &color_space)?;
+    let result = find(&image, &colors, &color_space)?;
 
     let (width, height) = result.dimensions();
 
     if let Some(output_image) =
         ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, result.into_raw_pixels())
     {
-        let output_file = replace_file(&output, &input, &None, &color_space)?;
+        let output_file = find_file(&output, &input, &None, &color_space)?;
         output_image.save(output_file)?;
     }
 
@@ -184,7 +184,7 @@ fn palette_file(
     Ok(output_path)
 }
 
-fn replace_file(
+fn find_file(
     output: &Option<PathBuf>,
     input: &Path,
     extension: &Option<Extension>,
@@ -211,7 +211,7 @@ fn replace_file(
         let millis = format!("{}{:03}", now.as_secs(), now.subsec_millis());
 
         let filename = format!(
-            "{stem}-replace-{cs}-{millis}.{extension}",
+            "{stem}-find-{cs}-{millis}.{extension}",
             cs = color_space.name()
         );
         let output_path = if let Some(parent) = parent {
