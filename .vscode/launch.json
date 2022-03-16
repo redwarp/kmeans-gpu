@@ -9,7 +9,12 @@
       "request": "launch",
       "name": "Debug unit tests in library 'k-means-gpu'",
       "cargo": {
-        "args": ["test", "--no-run", "--lib", "--package=k-means-gpu"],
+        "args": [
+          "test",
+          "--no-run",
+          "--lib",
+          "--package=k-means-gpu"
+        ],
         "filter": {
           "name": "k-means-gpu",
           "kind": "lib"
@@ -23,13 +28,23 @@
       "request": "launch",
       "name": "Debug executable 'k-means-gpu'",
       "cargo": {
-        "args": ["build", "--bin=k-means-gpu", "--package=k-means-gpu"],
+        "args": [
+          "build",
+          "--bin=k-means-gpu",
+          "--package=k-means-gpu"
+        ],
         "filter": {
           "name": "k-means-gpu",
           "kind": "bin"
         }
       },
-      "args": ["-k", "16", "-i", "./gfx/tokyo.jpg"],
+      "args": [
+        "replace",
+        "-i",
+        "./gfx/tokyo.png",
+        "-r",
+        "#000000,#ffffff"
+      ],
       "cwd": "${workspaceFolder}"
     },
     {

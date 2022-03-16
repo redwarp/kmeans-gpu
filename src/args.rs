@@ -6,6 +6,7 @@ use anyhow::anyhow;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use k_means_gpu::ColorSpace;
+use regex::Regex;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -46,6 +47,21 @@ pub enum Commands {
         /// Optional output file
         #[clap(short, long, parse(from_os_str))]
         output: Option<PathBuf>,
+        /// The colorspace to use when clustering colors. Lab gives more natural colors
+        #[clap(short, long="colorspace", default_value_t=ColorSpace::Lab)]
+        color_space: ColorSpace,
+    },
+    /// Replace colors in image
+    Replace {
+        /// Input file
+        #[clap(short, long, validator = validate_filenames, parse(from_os_str))]
+        input: PathBuf,
+        /// Optional output file
+        #[clap(short, long, parse(from_os_str))]
+        output: Option<PathBuf>,
+        /// List of RGB replacement colors, as #RRGGBB,#RRGGBB
+        #[clap(short, long, validator = validate_replacement)]
+        replacement: String,
         /// The colorspace to use when clustering colors. Lab gives more natural colors
         #[clap(short, long="colorspace", default_value_t=ColorSpace::Lab)]
         color_space: ColorSpace,
@@ -103,5 +119,16 @@ fn validate_filenames(s: &str) -> Result<()> {
         Ok(())
     } else {
         Err(anyhow!("Only support png or jpg files."))
+    }
+}
+
+fn validate_replacement(s: &str) -> Result<()> {
+    let re = Regex::new(r"^#[0-9a-fA-F]{6}(?:,#[0-9a-fA-F]{6})*$").unwrap();
+    if re.is_match(s) {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "Replacement color should be chained like #ffaa12,#fe7845,#aabbff"
+        ))
     }
 }

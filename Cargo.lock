@@ -638,6 +638,7 @@ dependencies = [
  "log",
  "palette",
  "pollster",
+ "regex",
  "wgpu",
 ]
 

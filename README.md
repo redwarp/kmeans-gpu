@@ -14,23 +14,31 @@ As this loads an image as a texture to your graphic cards, it also comes with so
 
 ## Sample
 
-![Tokyo](gfx/tokyo.jpg)
+![Tokyo](gfx/tokyo.png)
 
 ### Create image with colors replaced by their kmeans variant:
 
-```rust
-cargo run --release -- kmeans -i .\gfx\tokyo.jpg -k 6
+```sh
+cargo run --release -- kmeans -i .\gfx\tokyo.png -k 6
 ```
 
 ![Tokyo with k=6](gfx/tokyo-lab-k6.png)
 
 ### Output the palette:
 
-```rust
-cargo run --release -- palette -i .\gfx\tokyo.jpg -k 6
+```sh
+cargo run --release -- palette -i .\gfx\tokyo.png -k 6
 ```
 
 ![Tokyo palette with k=6](gfx/tokyo-palette-lab-k6.png)
+
+### Replace its colors:
+
+```sh
+cargo run --release -- replace -i .\gfx\tokyo.png -r "#050505,#ffffff,#ff0000"
+```
+
+![Tokyo with replaced colors](gfx/tokyo-replace-lab-dark-white-red.png)
 
 ## Sources
 

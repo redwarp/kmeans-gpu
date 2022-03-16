@@ -4,11 +4,11 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use anyhow::Result;
+use anyhow::{Ok, Result};
 use args::{Cli, Commands, Extension};
 use clap::Parser;
 use image::{ImageBuffer, Rgba};
-use k_means_gpu::{kmeans, palette, ColorSpace, Image};
+use k_means_gpu::{kmeans, palette, replace, ColorSpace, Image};
 
 mod args;
 
@@ -31,6 +31,12 @@ fn main() -> Result<()> {
             output,
             color_space,
         } => palette_subcommand(k, input, output, color_space),
+        Commands::Replace {
+            input,
+            output,
+            replacement,
+            color_space,
+        } => replace_subcommand(input, output, replacement, color_space),
     }?;
 
     Ok(())
@@ -78,6 +84,30 @@ fn palette_subcommand(
         .join(",");
 
     println!("Palette: {colors}");
+
+    Ok(())
+}
+
+fn replace_subcommand(
+    input: PathBuf,
+    output: Option<PathBuf>,
+    replacement: String,
+    color_space: ColorSpace,
+) -> Result<()> {
+    let colors = parse_colors(&replacement)?;
+
+    let image = Image::open(&input)?;
+
+    let result = replace(&image, &colors, &color_space)?;
+
+    let (width, height) = result.dimensions();
+
+    if let Some(output_image) =
+        ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, result.into_raw_pixels())
+    {
+        let output_file = replace_file(&output, &input, &None, &color_space)?;
+        output_image.save(output_file)?;
+    }
 
     Ok(())
 }
@@ -154,6 +184,46 @@ fn palette_file(
     Ok(output_path)
 }
 
+fn replace_file(
+    output: &Option<PathBuf>,
+    input: &Path,
+    extension: &Option<Extension>,
+    color_space: &ColorSpace,
+) -> Result<PathBuf> {
+    if let Some(output) = output {
+        Ok(output.clone())
+    } else {
+        let parent = input.parent();
+        let stem = input
+            .file_stem()
+            .expect("Expecting .jpg or .png files")
+            .to_string_lossy();
+        let extension = if let Some(extension) = extension {
+            Cow::Borrowed(extension.value())
+        } else {
+            input
+                .extension()
+                .expect("Expecting .jpg or .png files")
+                .to_string_lossy()
+        };
+
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?;
+        let millis = format!("{}{:03}", now.as_secs(), now.subsec_millis());
+
+        let filename = format!(
+            "{stem}-replace-{cs}-{millis}.{extension}",
+            cs = color_space.name()
+        );
+        let output_path = if let Some(parent) = parent {
+            parent.join(filename)
+        } else {
+            Path::new(&filename).to_path_buf()
+        };
+
+        Ok(output_path)
+    }
+}
+
 trait Openable: Sized {
     fn open<P>(path: P) -> Result<Self>
     where
@@ -192,4 +262,38 @@ where
     image_buffer.save(path)?;
 
     Ok(())
+}
+
+fn parse_colors(colors: &str) -> Result<Vec<[u8; 4]>> {
+    colors
+        .split(',')
+        .map(|color_string| {
+            let r = u8::from_str_radix(&color_string[1..3], 16)?;
+            let g = u8::from_str_radix(&color_string[3..5], 16)?;
+            let b = u8::from_str_radix(&color_string[5..7], 16)?;
+
+            Ok([r, g, b, 255])
+        })
+        .collect::<Result<Vec<_>>>()
+}
+
+#[cfg(test)]
+mod tests {
+    // Note this useful idiom: importing names from outer (for mod tests) scope.
+    use super::*;
+
+    #[test]
+    fn test_parse_colors() {
+        let colors = String::from("#ffffff,#000000");
+
+        let parsed = parse_colors(&colors);
+
+        assert!(parsed.is_ok());
+
+        let parsed = parsed.unwrap();
+        assert_eq!(2, parsed.len());
+
+        let expected: Vec<[u8; 4]> = vec![[255, 255, 255, 255], [0, 0, 0, 255]];
+        assert_eq!(parsed, expected);
+    }
 }

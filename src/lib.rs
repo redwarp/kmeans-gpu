@@ -4,7 +4,7 @@ use modules::{
     ChooseCentroidModule, ColorConverterModule, ColorReverterModule, ComputeBlock,
     FindCentroidModule, Module, PlusPlusInitModule, SwapModule,
 };
-use palette::{IntoColor, Lab, Pixel, Srgba};
+use palette::{IntoColor, Lab, Pixel, Srgb, Srgba};
 use pollster::FutureExt;
 use std::{fmt::Display, ops::Deref, str::FromStr, vec};
 use utils::padded_bytes_per_row;
@@ -657,6 +657,210 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
     }
 }
 
+pub fn replace(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -> Result<Image> {
+    let (width, height) = image.dimensions;
+
+    let centroids = fixed_centroids(colors);
+
+    let instance = Instance::new(Backends::all());
+    let adapter = instance
+        .request_adapter(&RequestAdapterOptionsBase {
+            power_preference: PowerPreference::HighPerformance,
+            force_fallback_adapter: false,
+            compatible_surface: None,
+        })
+        .block_on()
+        .ok_or_else(|| anyhow::anyhow!("Couldn't create the adapter"))?;
+
+    let features = adapter.features();
+    let (device, queue) = adapter
+        .request_device(
+            &DeviceDescriptor {
+                label: None,
+                features: features & (Features::TIMESTAMP_QUERY),
+                limits: Default::default(),
+            },
+            None,
+        )
+        .block_on()?;
+
+    let query_set = if features.contains(Features::TIMESTAMP_QUERY) {
+        Some(device.create_query_set(&QuerySetDescriptor {
+            count: 2,
+            ty: QueryType::Timestamp,
+            label: None,
+        }))
+    } else {
+        None
+    };
+    let query_buf = device.create_buffer_init(&BufferInitDescriptor {
+        label: None,
+        contents: &[0; 16],
+        usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+    });
+
+    let texture_size = wgpu::Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+    };
+
+    let input_texture = InputTexture::new(&device, &queue, image);
+    let work_texture = WorkTexture::new(&device, image);
+    let color_index_texture = ColorIndexTexture::new(&device, image);
+    let output_texture = OutputTexture::new(&device, image);
+
+    let centroid_buffer = device.create_buffer_init(&BufferInitDescriptor {
+        label: None,
+        contents: &centroids,
+        usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+    });
+
+    let color_converter_module = ColorConverterModule::new(
+        &device,
+        color_space,
+        image.dimensions,
+        &input_texture,
+        &work_texture,
+    );
+    let color_reverter_module = ColorReverterModule::new(
+        &device,
+        color_space,
+        image.dimensions,
+        &work_texture,
+        &output_texture,
+    );
+    let find_centroid_module = FindCentroidModule::new(
+        &device,
+        image.dimensions,
+        &work_texture,
+        &centroid_buffer,
+        &color_index_texture,
+    );
+
+    let swap_module = SwapModule::new(
+        &device,
+        image.dimensions,
+        &work_texture,
+        &centroid_buffer,
+        &color_index_texture,
+    );
+
+    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
+    if let Some(query_set) = &query_set {
+        encoder.write_timestamp(query_set, 0);
+    }
+
+    {
+        let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+            label: Some("Init pass"),
+        });
+        color_converter_module.dispatch(&mut compute_pass);
+        find_centroid_module.dispatch(&mut compute_pass);
+        swap_module.dispatch(&mut compute_pass);
+        color_reverter_module.dispatch(&mut compute_pass);
+    }
+    if let Some(query_set) = &query_set {
+        encoder.write_timestamp(query_set, 1);
+    }
+
+    let padded_bytes_per_row = padded_bytes_per_row(width as u64 * 4);
+    let unpadded_bytes_per_row = width as usize * 4;
+
+    let output_buffer_size =
+        padded_bytes_per_row as u64 * height as u64 * std::mem::size_of::<u8>() as u64;
+    let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: output_buffer_size,
+        usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let centroid_size = centroids.len() as BufferAddress;
+    let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: centroid_size,
+        usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    encoder.copy_texture_to_buffer(
+        wgpu::ImageCopyTexture {
+            aspect: wgpu::TextureAspect::All,
+            texture: &output_texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+        },
+        wgpu::ImageCopyBuffer {
+            buffer: &output_buffer,
+            layout: wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: std::num::NonZeroU32::new(padded_bytes_per_row as u32),
+                rows_per_image: std::num::NonZeroU32::new(height),
+            },
+        },
+        texture_size,
+    );
+
+    encoder.copy_buffer_to_buffer(&centroid_buffer, 0, &staging_buffer, 0, centroid_size);
+
+    if let Some(query_set) = &query_set {
+        encoder.resolve_query_set(query_set, 0..2, &query_buf, 0);
+    }
+    queue.submit(Some(encoder.finish()));
+
+    let buffer_slice = output_buffer.slice(..);
+    let buffer_future = buffer_slice.map_async(MapMode::Read);
+
+    let cent_buffer_slice = staging_buffer.slice(..);
+    let cent_buffer_future = cent_buffer_slice.map_async(MapMode::Read);
+
+    let query_slice = query_buf.slice(..);
+    let query_future = query_slice.map_async(MapMode::Read);
+
+    device.poll(wgpu::Maintain::Wait);
+
+    if let Ok(()) = cent_buffer_future.block_on() {
+        let data = cent_buffer_slice.get_mapped_range();
+        if log_enabled!(log::Level::Debug) {
+            for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[16..])
+                .chunks_exact(4)
+                .enumerate()
+            {
+                debug!("Centroid {index} = {k:?}")
+            }
+        }
+    }
+
+    if query_future.block_on().is_ok() && features.contains(Features::TIMESTAMP_QUERY) {
+        let ts_period = queue.get_timestamp_period();
+        let ts_data_raw = &*query_slice.get_mapped_range();
+        let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
+        println!(
+            "Compute shader elapsed: {:?}ms",
+            (ts_data[1] - ts_data[0]) as f64 * ts_period as f64 * 1e-6
+        );
+    }
+
+    match buffer_future.block_on() {
+        Ok(()) => {
+            let padded_data = buffer_slice.get_mapped_range();
+            let mut pixels: Vec<u8> = vec![0; unpadded_bytes_per_row * height as usize];
+            for (padded, pixels) in padded_data
+                .chunks_exact(padded_bytes_per_row as usize)
+                .zip(pixels.chunks_exact_mut(unpadded_bytes_per_row))
+            {
+                pixels.copy_from_slice(&padded[..unpadded_bytes_per_row]);
+            }
+
+            let result = Image::from_raw_pixels((width, height), &pixels);
+
+            Ok(result)
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
 fn init_centroids(k: u32) -> Vec<u8> {
     let mut centroids: Vec<u8> = vec![];
     // Aligned 16, see https://www.w3.org/TR/WGSL/#address-space-layout-constraints
@@ -667,6 +871,24 @@ fn init_centroids(k: u32) -> Vec<u8> {
             .flat_map(|_| [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
             .collect::<Vec<u8>>(),
     );
+
+    centroids
+}
+
+fn fixed_centroids(colors: &[[u8; 4]]) -> Vec<u8> {
+    let mut centroids: Vec<u8> = Vec::with_capacity(16 * (colors.len() + 1));
+
+    centroids.extend_from_slice(bytemuck::cast_slice(&[colors.len() as u32, 0, 0, 0]));
+
+    centroids.extend_from_slice(bytemuck::cast_slice(
+        &colors
+            .iter()
+            .map(|c| {
+                let lab = IntoColor::<Lab>::into_color(Srgb::new(c[0], c[1], c[2]).into_format());
+                [lab.l, lab.a, lab.b, 1.0]
+            })
+            .collect::<Vec<[f32; 4]>>(),
+    ));
 
     centroids
 }
