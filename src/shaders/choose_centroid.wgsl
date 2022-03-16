@@ -4,10 +4,6 @@ struct Centroids {
     data: array<vec4<f32>>;
 };
 
-struct Indices {
-    data: array<u32>;
-};
-
 struct AtomicBuffer {
     data: array<atomic<u32>>;
 };
@@ -102,8 +98,9 @@ fn main(
 
     var local: vec4<f32> = vec4<f32>(0.0);
     for (var i: u32 = 0u; i < N_SEQ; i = i + 1u) {
-        if (in_bounds(global_x * N_SEQ + i, dimensions) && match_centroid(k, global_x * N_SEQ + i, width)) {
-            local = local + vec4<f32>(textureLoad(pixels, coords(global_x * N_SEQ + i, dimensions), 0).rgb, 1.0);
+        let index = global_x * N_SEQ + i;
+        if (in_bounds(index, dimensions) && match_centroid(k, index, width)) {
+            local = local + vec4<f32>(textureLoad(pixels, coords(index, dimensions), 0).rgb, 1.0);
         }
     }
 
