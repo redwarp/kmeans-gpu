@@ -242,7 +242,7 @@ impl Deref for OutputTexture {
 pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> {
     let (width, height) = image.dimensions;
 
-    let centroids = init_centroids(k);
+    let centroids = empty_centroids(k);
 
     let instance = Instance::new(Backends::all());
     let adapter = instance
@@ -477,7 +477,7 @@ pub fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> 
 }
 
 pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u8; 4]>> {
-    let centroids = init_centroids(k);
+    let centroids = empty_centroids(k);
 
     let instance = Instance::new(Backends::all());
     let adapter = instance
@@ -660,7 +660,7 @@ pub fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u
 pub fn replace(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -> Result<Image> {
     let (width, height) = image.dimensions;
 
-    let centroids = fixed_centroids(colors);
+    let centroids = fixed_centroids(colors, color_space);
 
     let instance = Instance::new(Backends::all());
     let adapter = instance
@@ -861,7 +861,7 @@ pub fn replace(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -> R
     }
 }
 
-fn init_centroids(k: u32) -> Vec<u8> {
+fn empty_centroids(k: u32) -> Vec<u8> {
     let mut centroids: Vec<u8> = vec![];
     // Aligned 16, see https://www.w3.org/TR/WGSL/#address-space-layout-constraints
     centroids.extend_from_slice(bytemuck::cast_slice(&[k, 0, 0, 0]));
@@ -875,17 +875,24 @@ fn init_centroids(k: u32) -> Vec<u8> {
     centroids
 }
 
-fn fixed_centroids(colors: &[[u8; 4]]) -> Vec<u8> {
+fn fixed_centroids(colors: &[[u8; 4]], color_space: &ColorSpace) -> Vec<u8> {
     let mut centroids: Vec<u8> = Vec::with_capacity(16 * (colors.len() + 1));
 
+    // Aligned 16, see https://www.w3.org/TR/WGSL/#address-space-layout-constraints
     centroids.extend_from_slice(bytemuck::cast_slice(&[colors.len() as u32, 0, 0, 0]));
 
     centroids.extend_from_slice(bytemuck::cast_slice(
         &colors
             .iter()
-            .map(|c| {
-                let lab = IntoColor::<Lab>::into_color(Srgb::new(c[0], c[1], c[2]).into_format());
-                [lab.l, lab.a, lab.b, 1.0]
+            .map(|c| match color_space {
+                ColorSpace::Lab => {
+                    let lab: Lab = Srgb::new(c[0], c[1], c[2]).into_format().into_color();
+                    [lab.l, lab.a, lab.b, 1.0]
+                }
+                ColorSpace::Rgb => {
+                    let srgb: Srgb = Srgb::new(c[0], c[1], c[2]).into_format();
+                    [srgb.red, srgb.green, srgb.blue, 1.0]
+                }
             })
             .collect::<Vec<[f32; 4]>>(),
     ));

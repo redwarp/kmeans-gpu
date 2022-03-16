@@ -32,7 +32,7 @@ pub enum Commands {
         /// Optional extension to use if an output file is not specified
         #[clap(short, long)]
         extension: Option<Extension>,
-        /// The colorspace to use when clustering colors. Lab gives more natural colors
+        /// The colorspace to use when calculating colors. Lab gives more natural colors
         #[clap(short, long="colorspace", default_value_t=ColorSpace::Lab)]
         color_space: ColorSpace,
     },
@@ -47,7 +47,7 @@ pub enum Commands {
         /// Optional output file
         #[clap(short, long, parse(from_os_str))]
         output: Option<PathBuf>,
-        /// The colorspace to use when clustering colors. Lab gives more natural colors
+        /// The colorspace to use when calculating colors. Lab gives more natural colors
         #[clap(short, long="colorspace", default_value_t=ColorSpace::Lab)]
         color_space: ColorSpace,
     },
@@ -62,7 +62,7 @@ pub enum Commands {
         /// List of RGB replacement colors, as #RRGGBB,#RRGGBB
         #[clap(short, long, validator = validate_replacement)]
         replacement: String,
-        /// The colorspace to use when clustering colors. Lab gives more natural colors
+        /// The colorspace to use when calculating colors. Lab gives more natural colors
         #[clap(short, long="colorspace", default_value_t=ColorSpace::Lab)]
         color_space: ColorSpace,
     },
