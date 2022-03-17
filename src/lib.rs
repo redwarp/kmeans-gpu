@@ -1,8 +1,8 @@
 use anyhow::{anyhow, Result};
 use log::{debug, log_enabled};
 use modules::{
-    ChooseCentroidModule, ColorConverterModule, ColorReverterModule, DitherModule,
-    FindCentroidModule, Module, PlusPlusInitModule, SwapModule,
+    ChooseCentroidModule, ColorConverterModule, ColorReverterModule, FindCentroidModule,
+    MixColorsModule, Module, PlusPlusInitModule, SwapModule,
 };
 use palette::{IntoColor, Lab, Pixel, Srgb, Srgba};
 use std::{fmt::Display, ops::Deref, str::FromStr, vec};
@@ -94,6 +94,38 @@ impl FromStr for ColorSpace {
 }
 
 impl Display for ColorSpace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
+    }
+}
+
+pub enum MixMode {
+    Dither,
+    Meld,
+}
+
+impl MixMode {
+    fn name(&self) -> &'static str {
+        match self {
+            MixMode::Dither => "dither",
+            MixMode::Meld => "meld",
+        }
+    }
+}
+
+impl FromStr for MixMode {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "dither" => Ok(MixMode::Dither),
+            "meld" => Ok(MixMode::Meld),
+            _ => Err(anyhow!("Unsupported mix mode {s}")),
+        }
+    }
+}
+
+impl Display for MixMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.name())
     }
@@ -948,7 +980,12 @@ pub async fn find(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -
     }
 }
 
-pub async fn dither(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> {
+pub async fn mix(
+    k: u32,
+    image: &Image,
+    color_space: &ColorSpace,
+    mix_mode: &MixMode,
+) -> Result<Image> {
     let (width, height) = image.dimensions;
 
     let instance = Instance::new(Backends::all());
@@ -1022,13 +1059,14 @@ pub async fn dither(k: u32, image: &Image, color_space: &ColorSpace) -> Result<I
         &color_index_texture,
         &find_centroid_module,
     );
-    let dither_module = DitherModule::new(
+    let mix_colors_module = MixColorsModule::new(
         &device,
         image.dimensions,
         &work_texture,
         &dithered_texture,
         &color_index_texture,
         &centroids_buffer,
+        &mix_mode,
     );
     let color_reverter_module = ColorReverterModule::new(
         &device,
@@ -1070,7 +1108,7 @@ pub async fn dither(k: u32, image: &Image, color_space: &ColorSpace) -> Result<I
         let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
             label: Some("Swap and fetch result pass"),
         });
-        dither_module.dispatch(&mut compute_pass);
+        mix_colors_module.dispatch(&mut compute_pass);
         color_reverter_module.dispatch(&mut compute_pass);
     }
     if let Some(query_set) = &query_set {

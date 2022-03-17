@@ -8,7 +8,7 @@ use anyhow::{Ok, Result};
 use args::{Cli, Commands, Extension};
 use clap::Parser;
 use image::{ImageBuffer, Rgba};
-use k_means_gpu::{dither, find, kmeans, palette, ColorSpace, Image};
+use k_means_gpu::{find, kmeans, mix, palette, ColorSpace, Image, MixMode};
 use pollster::FutureExt;
 
 mod args;
@@ -38,13 +38,14 @@ fn main() -> Result<()> {
             replacement,
             color_space,
         } => find_subcommand(input, output, replacement, color_space).block_on(),
-        Commands::Dither {
+        Commands::Mix {
             k,
             input,
             output,
             extension,
             color_space,
-        } => dither_subcommand(k, input, output, extension, color_space).block_on(),
+            mix_mode,
+        } => mix_subcommand(k, input, output, extension, color_space, mix_mode).block_on(),
     }?;
 
     Ok(())
@@ -120,22 +121,30 @@ async fn find_subcommand(
     Ok(())
 }
 
-async fn dither_subcommand(
+async fn mix_subcommand(
     k: u32,
     input: PathBuf,
     output: Option<PathBuf>,
     extension: Option<Extension>,
     color_space: ColorSpace,
+    mix_mode: MixMode,
 ) -> Result<()> {
     let image = Image::open(&input)?;
 
-    let result = dither(k, &image, &color_space).await?;
+    let result = mix(k, &image, &color_space, &mix_mode).await?;
     let (width, height) = result.dimensions();
 
     if let Some(output_image) =
         ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, result.into_raw_pixels())
     {
-        let output_file = output_file(k, "dither", &output, &input, &extension, &color_space)?;
+        let output_file = output_file(
+            k,
+            &format!("mix-{mix_mode}"),
+            &output,
+            &input,
+            &extension,
+            &color_space,
+        )?;
         output_image.save(output_file)?;
     }
 
@@ -159,7 +168,7 @@ fn output_file(
             .expect("Expecting .jpg or .png files")
             .to_string_lossy();
         let extension = if let Some(extension) = extension {
-            Cow::Borrowed(extension.value())
+            Cow::Borrowed(extension.name())
         } else {
             input
                 .extension()
@@ -230,7 +239,7 @@ fn find_file(
             .expect("Expecting .jpg or .png files")
             .to_string_lossy();
         let extension = if let Some(extension) = extension {
-            Cow::Borrowed(extension.value())
+            Cow::Borrowed(extension.name())
         } else {
             input
                 .extension()

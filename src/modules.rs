@@ -13,7 +13,7 @@ use wgpu::{
 
 use crate::{
     utils::compute_work_group_count, CentroidsBuffer, ColorIndexTexture, ColorSpace, InputTexture,
-    OutputTexture, WorkTexture,
+    MixMode, OutputTexture, WorkTexture,
 };
 
 pub(crate) trait Module {
@@ -1112,13 +1112,13 @@ impl<'a> PlusPlusInitModule<'a> {
     }
 }
 
-pub(crate) struct DitherModule {
+pub(crate) struct MixColorsModule {
     pipeline: ComputePipeline,
     bind_group: BindGroup,
     dispatch_size: (u32, u32),
 }
 
-impl DitherModule {
+impl MixColorsModule {
     pub fn new(
         device: &Device,
         image_dimensions: (u32, u32),
@@ -1126,14 +1126,15 @@ impl DitherModule {
         output_texture: &WorkTexture,
         color_index_texture: &ColorIndexTexture,
         centroids_buffer: &CentroidsBuffer,
+        mix_mode: &MixMode,
     ) -> Self {
         let shader_module = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
-            label: Some("Dither shader"),
-            source: ShaderSource::Wgsl(include_str!("shaders/ordered_dithering.wgsl").into()),
+            label: Some("Mix colors shader"),
+            source: ShaderSource::Wgsl(include_str!("shaders/mix_colors.wgsl").into()),
         });
 
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("Dither bind group layout"),
+            label: Some("Mix colors bind group layout"),
             entries: &[
                 WorkTexture::texture_2d_layout(0),
                 WorkTexture::texture_storage_layout(1),
@@ -1143,7 +1144,7 @@ impl DitherModule {
         });
 
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("Dither bind group"),
+            label: Some("Mix colors bind group"),
             layout: &bind_group_layout,
             entries: &[
                 BindGroupEntry {
@@ -1172,16 +1173,19 @@ impl DitherModule {
         });
 
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            label: Some("Dither pipeline layout"),
+            label: Some("Mix colors pipeline layout"),
             bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
 
         let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-            label: Some("Dither pipeline"),
+            label: Some("Mix colors pipeline"),
             layout: Some(&pipeline_layout),
             module: &shader_module,
-            entry_point: "main",
+            entry_point: match mix_mode {
+                MixMode::Dither => "main_dither",
+                MixMode::Meld => "main_meld",
+            },
         });
 
         let dispatch_size = compute_work_group_count(image_dimensions, (16, 16));
@@ -1194,7 +1198,7 @@ impl DitherModule {
     }
 }
 
-impl Module for DitherModule {
+impl Module for MixColorsModule {
     fn dispatch<'a>(&'a self, compute_pass: &mut ComputePass<'a>) {
         compute_pass.set_pipeline(&self.pipeline);
         compute_pass.set_bind_group(0, &self.bind_group, &[]);

@@ -6,6 +6,7 @@ use anyhow::anyhow;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use k_means_gpu::ColorSpace;
+use k_means_gpu::MixMode;
 use regex::Regex;
 
 #[derive(Parser)]
@@ -66,8 +67,8 @@ pub enum Commands {
         #[clap(short, long="colorspace", default_value_t=ColorSpace::Lab)]
         color_space: ColorSpace,
     },
-    /// Quantized the image with kmeans, then dithers it with the reduced colors.
-    Dither {
+    /// Quantized the image with kmeans, then mix it's resulting color.
+    Mix {
         /// K value, aka the number of colors we want to extract
         #[clap(short, validator = validate_k_for_dithering)]
         k: u32,
@@ -83,6 +84,9 @@ pub enum Commands {
         /// The colorspace to use when calculating colors. Lab gives more natural colors
         #[clap(short, long="colorspace", default_value_t=ColorSpace::Lab)]
         color_space: ColorSpace,
+        /// Mix function to apply on the result
+        #[clap(short, long="mixmode", default_value_t=MixMode::Dither)]
+        mix_mode: MixMode,
     },
 }
 
@@ -93,7 +97,7 @@ pub enum Extension {
 }
 
 impl Extension {
-    pub fn value(&self) -> &'static str {
+    pub fn name(&self) -> &'static str {
         match self {
             Extension::Png => "png",
             Extension::Jpg => "jpg",
@@ -115,7 +119,7 @@ impl FromStr for Extension {
 
 impl Display for Extension {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.value())
+        write!(f, "{}", self.name())
     }
 }
 

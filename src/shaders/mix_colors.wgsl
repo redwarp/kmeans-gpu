@@ -6,15 +6,10 @@ struct Centroids {
     data: array<vec4<f32>>;
 };
 
-// struct Indices {
-//     data: array<u32, 16>;
-// };
-
 [[group(0), binding(0)]] var input_texture: texture_2d<f32>;
 [[group(0), binding(1)]] var output_texture : texture_storage_2d<rgba16float, write>;
 [[group(0), binding(2)]] var color_indices: texture_2d<u32>;
 [[group(0), binding(3)]] var<storage, read> centroids: Centroids;
-// [[group(0), binding(4)]] var<uniform> index_matrix: Indices;
 
 let index_matrix: array<i32, 16> = array<i32, 16>(0,  8,  2,  10,
                                                   12, 4,  14, 6,
@@ -50,8 +45,24 @@ fn two_closest_colors(color: vec4<f32>) -> array<vec4<f32>, 2> {
     return values;
 }
 
+fn dither(color: vec4<f32>, coords: vec2<i32>) -> vec4<f32> {
+    let closest_colors = two_closest_colors(color);
+    let index_value = index_value(coords);
+    let factor = distance(color, closest_colors[0]) / distance(closest_colors[0], closest_colors[1]);
+
+    return select(closest_colors[1], closest_colors[0], factor < index_value);
+}
+
+fn meld(color: vec4<f32>, coords: vec2<i32>) -> vec4<f32> {
+    let closest_colors = two_closest_colors(color);
+    let index_value = index_value(coords);
+    let factor = distance(color, closest_colors[1]) / distance(closest_colors[0], closest_colors[1]);
+
+    return factor * closest_colors[0] + (1.0 - factor) * closest_colors[1];
+}
+
 [[stage(compute), workgroup_size(16, 16)]]
-fn main(
+fn main_dither(
     [[builtin(global_invocation_id)]] global_id : vec3<u32>,
 ) {
     let dimensions = textureDimensions(output_texture);
@@ -62,11 +73,22 @@ fn main(
     }
 
     let color = textureLoad(input_texture, coords, 0);
-    let closest_colors = two_closest_colors(color);
-    let index_value = index_value(coords);
-    let factor = distance(color, closest_colors[0]) / distance(closest_colors[0], closest_colors[1]);
 
-    let final_color: vec4<f32> = select(closest_colors[1], closest_colors[0], factor < index_value);
+    textureStore(output_texture, coords, dither(color, coords));
+}
 
-    textureStore(output_texture, coords, final_color);
+[[stage(compute), workgroup_size(16, 16)]]
+fn main_meld(
+    [[builtin(global_invocation_id)]] global_id : vec3<u32>,
+) {
+    let dimensions = textureDimensions(output_texture);
+    let coords = vec2<i32>(global_id.xy);
+
+    if(coords.x >= dimensions.x || coords.y >= dimensions.y) {
+        return;
+    }
+
+    let color = textureLoad(input_texture, coords, 0);
+    
+    textureStore(output_texture, coords, meld(color, coords));
 }
