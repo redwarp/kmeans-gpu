@@ -129,17 +129,14 @@ fn main(
         if (local_id.x >= (1u << i)) {
             let value = scratch[local_id.x - (1u << i)];
             let smaller = local.distance < value.distance;
-            local.distance = f32(smaller) * value.distance + f32(!smaller) * local.distance;
-            local.index = u32(smaller) * value.index + u32(!smaller) * local.index;
+            local.distance = select(local.distance, value.distance, smaller);
+            local.index = select(local.index, value.index, smaller);
         }
         workgroupBarrier();
         scratch[local_id.x] = local;
         workgroupBarrier();
     }
     
-    var exclusive_prefix: Candidate;
-    exclusive_prefix.index = 0u;
-    exclusive_prefix.distance = 0.0;
     var flag = FLAG_AGGREGATE_READY;
     
     if (local_id.x == workgroup_size - 1u) {
@@ -171,36 +168,28 @@ fn main(
             if (flag == FLAG_PREFIX_READY) {
                 if (local_id.x == workgroup_size - 1u) {
                     let their_prefix = atomicLoadCandidate(loop_back_ix * 4u + 0u);
-                    if (their_prefix.distance > exclusive_prefix.distance) {
-                        exclusive_prefix.distance = their_prefix.distance;
-                        exclusive_prefix.index = their_prefix.index;
-                    }
+                    let smaller = their_prefix.distance > local.distance;
+                    local.distance = select(local.distance, their_prefix.distance, smaller);
+                    local.index = select(local.index, their_prefix.index, smaller);
                 }
                 break;
             } else if (flag == FLAG_AGGREGATE_READY) {                
                 if (local_id.x == workgroup_size - 1u) {                    
-                    let their_aggregate = atomicLoadCandidate(loop_back_ix * 4u + 2u);                    
-                    if (their_aggregate.distance > exclusive_prefix.distance) {
-                        exclusive_prefix.distance = their_aggregate.distance;
-                        exclusive_prefix.index = their_aggregate.index;
-                    }
+                    let their_aggregate = atomicLoadCandidate(loop_back_ix * 4u + 2u);       
+                    let smaller = their_aggregate.distance > local.distance;                    
+                    local.distance = select(local.distance, their_aggregate.distance, smaller);
+                    local.index = select(local.index, their_aggregate.index, smaller);
                 }
                 loop_back_ix = loop_back_ix - 1u;
             }
             // else spin
         }
 
-        // compute inclusive prefix
         storageBarrier();
         if (local_id.x == workgroup_size - 1u) {
-            var inclusive_prefix: Candidate;
-            let smaller = local.distance > exclusive_prefix.distance;
-            inclusive_prefix.distance = f32(smaller) * local.distance + f32(!smaller) * exclusive_prefix.distance;
-            inclusive_prefix.index = u32(smaller) * local.index + u32(!smaller) * exclusive_prefix.index;
-
-            shared_prefix = exclusive_prefix;
+            shared_prefix = local;
             
-            atomicStoreCandidate(workgroup_id.x * 2u + 0u, inclusive_prefix);
+            atomicStoreCandidate(workgroup_id.x * 2u + 0u, local);
             atomicStore(&flag_buffer.data[workgroup_id.x], FLAG_PREFIX_READY);
         }
         workgroupBarrier();
@@ -208,10 +197,7 @@ fn main(
     }
 
     if (workgroup_id.x == last_group_idx() & local_id.x == workgroup_size - 1u) {
-        var centroid: Candidate;
-        let smaller = local.distance > shared_prefix.distance;
-        centroid.distance = f32(smaller) * local.distance + f32(!smaller) * shared_prefix.distance;
-        centroid.index = u32(smaller) * local.index + u32(!smaller) * shared_prefix.index; 
+        var centroid: Candidate = shared_prefix;
 
         let centroid_coords = coords(centroid.index, dimensions);
         let new_centroid = textureLoad(pixels, centroid_coords, 0);
