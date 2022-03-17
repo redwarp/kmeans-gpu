@@ -12,8 +12,8 @@ use wgpu::{
 };
 
 use crate::{
-    utils::compute_work_group_count, ColorIndexTexture, ColorSpace, InputTexture, OutputTexture,
-    WorkTexture,
+    utils::compute_work_group_count, CentroidsBuffer, ColorIndexTexture, ColorSpace, InputTexture,
+    OutputTexture, WorkTexture,
 };
 
 pub(crate) trait Module {
@@ -269,7 +269,7 @@ impl SwapModule {
         device: &Device,
         image_dimensions: (u32, u32),
         work_texture: &WorkTexture,
-        centroid_buffer: &Buffer,
+        centroid_buffer: &CentroidsBuffer,
         color_index_texture: &ColorIndexTexture,
     ) -> Self {
         let swap_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
@@ -377,7 +377,7 @@ impl FindCentroidModule {
         device: &Device,
         image_dimensions: (u32, u32),
         work_texture: &WorkTexture,
-        centroid_buffer: &Buffer,
+        centroid_buffer: &CentroidsBuffer,
         color_index_texture: &ColorIndexTexture,
     ) -> Self {
         let find_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
@@ -509,7 +509,7 @@ impl<'a> ChooseCentroidModule<'a> {
         image_dimensions: (u32, u32),
         k: u32,
         work_texture: &WorkTexture,
-        centroid_buffer: &Buffer,
+        centroid_buffer: &CentroidsBuffer,
         color_index_texture: &ColorIndexTexture,
         find_centroid_module: &'a FindCentroidModule,
     ) -> Self {
@@ -870,7 +870,7 @@ impl<'a> ChooseCentroidModule<'a> {
 pub(crate) struct PlusPlusInitModule<'a> {
     k: u32,
     image_dimensions: (u32, u32),
-    centroid_buffer: &'a Buffer,
+    centroid_buffer: &'a CentroidsBuffer,
     work_texture: &'a WorkTexture,
 }
 
@@ -879,7 +879,7 @@ impl<'a> PlusPlusInitModule<'a> {
         image_dimensions: (u32, u32),
         k: u32,
         work_texture: &'a WorkTexture,
-        centroid_buffer: &'a Buffer,
+        centroid_buffer: &'a CentroidsBuffer,
     ) -> Self {
         Self {
             k,
