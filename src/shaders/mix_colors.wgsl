@@ -48,7 +48,7 @@ fn two_closest_colors(color: vec4<f32>) -> array<vec4<f32>, 2> {
 fn dither(color: vec4<f32>, coords: vec2<i32>) -> vec4<f32> {
     let closest_colors = two_closest_colors(color);
     let index_value = index_value(coords);
-    let factor = distance(color, closest_colors[0]) / distance(closest_colors[0], closest_colors[1]);
+    let factor = distance(color.rgb, closest_colors[0].rgb) / distance(closest_colors[0].rgb, closest_colors[1].rgb);
 
     return select(closest_colors[1], closest_colors[0], factor < index_value);
 }
@@ -56,7 +56,7 @@ fn dither(color: vec4<f32>, coords: vec2<i32>) -> vec4<f32> {
 fn meld(color: vec4<f32>, coords: vec2<i32>) -> vec4<f32> {
     let closest_colors = two_closest_colors(color);
     let index_value = index_value(coords);
-    let factor = distance(color, closest_colors[1]) / distance(closest_colors[0], closest_colors[1]);
+    let factor = distance(color.rgb, closest_colors[1].rgb) / distance(closest_colors[0].rgb, closest_colors[1].rgb);
 
     return factor * closest_colors[0] + (1.0 - factor) * closest_colors[1];
 }
