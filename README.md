@@ -43,10 +43,10 @@ cargo run --release -- find -i .\gfx\tokyo.png -r "#050505,#ffffff,#ff0000"
 ### Dither image:
 
 ```sh
-cargo run --release -- dither -i .\gfx\tokyo.png -k 6
+cargo run --release -- mix -i .\gfx\tokyo.png -k 6
 ```
 
-![Tokyo dithered with k=6](gfx/tokyo-dither-lab-k6.png)
+![Tokyo dithered with k=6](gfx/tokyo-mix-dither-lab-k6.png)
 
 ## Sources
 
