@@ -53,6 +53,24 @@ fn dither(color: vec4<f32>, coords: vec2<i32>) -> vec4<f32> {
     return select(closest_colors[1], closest_colors[0], factor < index_value);
 }
 
+fn dither2(color: vec4<f32>, coords: vec2<i32>) -> vec4<f32> {
+    // Based on https://en.wikipedia.org/wiki/Ordered_dithering
+    let threshold = vec3<f32>(100.0 / sqrt(f32(centroids.count)), 0.0, 0.0);
+    let index_value = index_value(coords) - 0.5;
+
+    let adjusted = color.rgb + threshold * index_value;
+    
+    var closest = vec3<f32>(10000.0);
+    for (var i: u32 = 0u; i < centroids.count; i = i + 1u) {
+        let temp = centroids.data[i].rgb;
+        let temp_distance = distance(adjusted, temp);
+        if (temp_distance < distance(adjusted, closest)){
+            closest = temp;
+        }
+    }
+    return vec4<f32>(closest, 1.0);
+}
+
 fn meld(color: vec4<f32>, coords: vec2<i32>) -> vec4<f32> {
     let closest_colors = two_closest_colors(color);
     let index_value = index_value(coords);
@@ -74,7 +92,7 @@ fn main_dither(
 
     let color = textureLoad(input_texture, coords, 0);
 
-    textureStore(output_texture, coords, dither(color, coords));
+    textureStore(output_texture, coords, dither2(color, coords));
 }
 
 [[stage(compute), workgroup_size(16, 16)]]
