@@ -22,7 +22,7 @@ As this loads an image as a texture to your graphic cards, it also comes with so
 cargo run --release -- kmeans -i .\gfx\tokyo.png -k 6
 ```
 
-![Tokyo with k=6](gfx/tokyo-lab-k6.png)
+![Tokyo with k=6](gfx/tokyo-kmeans-lab-k6.png)
 
 ### Output the palette:
 
@@ -40,6 +40,14 @@ cargo run --release -- find -i .\gfx\tokyo.png -r "#050505,#ffffff,#ff0000"
 
 ![Tokyo with looked up colors](gfx/tokyo-find-lab-dark-white-red.png)
 
+### Dither image:
+
+```sh
+cargo run --release -- dither -i .\gfx\tokyo.png -k 6
+```
+
+![Tokyo dithered with k=6](gfx/tokyo-dither-lab-k6.png)
+
 ## Sources
 
 I had to read a bunch of stuff to even start to make sense of it all.
@@ -52,6 +60,9 @@ I had to read a bunch of stuff to even start to make sense of it all.
   + https://en.wikipedia.org/wiki/Prefix_sum
   + Prefix sum in wgsl: https://github.com/googlefonts/compute-shader-101/blob/prefix/compute-shader-hello/src/shader.wgsl
   + https://github.com/linebender/piet-gpu/blob/prefix/piet-gpu-hal/examples/shader/prefix.comp
+* About dithering:
+  + https://en.wikipedia.org/wiki/Ordered_dithering
+  + http://alex-charlton.com/posts/Dithering_on_the_GPU/
 
 ## License
 

@@ -1,18 +1,19 @@
 use anyhow::{anyhow, Result};
 use log::{debug, log_enabled};
 use modules::{
-    ChooseCentroidModule, ColorConverterModule, ColorReverterModule, FindCentroidModule, Module,
-    PlusPlusInitModule, SwapModule,
+    ChooseCentroidModule, ColorConverterModule, ColorReverterModule, DitherModule,
+    FindCentroidModule, Module, PlusPlusInitModule, SwapModule,
 };
 use palette::{IntoColor, Lab, Pixel, Srgb, Srgba};
 use std::{fmt::Display, ops::Deref, str::FromStr, vec};
 use utils::padded_bytes_per_row;
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
-    Backends, Buffer, BufferUsages, CommandEncoder, CommandEncoderDescriptor,
-    ComputePassDescriptor, Device, DeviceDescriptor, Features, ImageDataLayout, Instance, MapMode,
-    PowerPreference, QuerySetDescriptor, QueryType, Queue, RequestAdapterOptionsBase, Texture,
-    TextureDimension, TextureFormat, TextureUsages,
+    Backends, BindGroupLayoutEntry, BindingType, Buffer, BufferBindingType, BufferUsages,
+    CommandEncoder, CommandEncoderDescriptor, ComputePassDescriptor, Device, DeviceDescriptor,
+    Features, ImageDataLayout, Instance, MapMode, PowerPreference, QuerySetDescriptor, QueryType,
+    Queue, RequestAdapterOptionsBase, ShaderStages, StorageTextureAccess, Texture,
+    TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureViewDimension,
 };
 
 mod modules;
@@ -164,6 +165,32 @@ impl WorkTexture {
 
         Self(texture)
     }
+
+    fn texture_2d_layout(binding: u32) -> BindGroupLayoutEntry {
+        BindGroupLayoutEntry {
+            binding,
+            visibility: ShaderStages::COMPUTE,
+            ty: BindingType::Texture {
+                sample_type: TextureSampleType::Float { filterable: false },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        }
+    }
+
+    fn texture_storage_layout(binding: u32) -> BindGroupLayoutEntry {
+        BindGroupLayoutEntry {
+            binding,
+            visibility: ShaderStages::COMPUTE,
+            ty: BindingType::StorageTexture {
+                access: StorageTextureAccess::WriteOnly,
+                format: TextureFormat::Rgba16Float,
+                view_dimension: TextureViewDimension::D2,
+            },
+            count: None,
+        }
+    }
 }
 
 impl Deref for WorkTexture {
@@ -195,6 +222,19 @@ impl ColorIndexTexture {
         });
 
         Self(texture)
+    }
+
+    fn texture_2d_layout(binding: u32) -> BindGroupLayoutEntry {
+        BindGroupLayoutEntry {
+            binding,
+            visibility: ShaderStages::COMPUTE,
+            ty: BindingType::Texture {
+                sample_type: TextureSampleType::Uint,
+                view_dimension: TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        }
     }
 }
 
@@ -372,6 +412,19 @@ impl CentroidsBuffer {
         encoder.copy_buffer_to_buffer(&self.buffer, 0, &staging_buffer, 0, self.copy_size);
 
         staging_buffer
+    }
+
+    fn layout(binding: u32, read_only: bool) -> BindGroupLayoutEntry {
+        BindGroupLayoutEntry {
+            binding,
+            visibility: ShaderStages::COMPUTE,
+            ty: BindingType::Buffer {
+                ty: BufferBindingType::Storage { read_only },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }
     }
 }
 
@@ -846,6 +899,197 @@ pub async fn find(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -
     let buffer_future = buffer_slice.map_async(MapMode::Read);
 
     let cent_buffer_slice = centroids_staging_buffer.slice(..);
+    let cent_buffer_future = cent_buffer_slice.map_async(MapMode::Read);
+
+    let query_slice = query_buf.slice(..);
+    let query_future = query_slice.map_async(MapMode::Read);
+
+    device.poll(wgpu::Maintain::Wait);
+
+    if let Ok(()) = cent_buffer_future.await {
+        let data = cent_buffer_slice.get_mapped_range();
+        if log_enabled!(log::Level::Debug) {
+            for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[16..])
+                .chunks_exact(4)
+                .enumerate()
+            {
+                debug!("Centroid {index} = {k:?}")
+            }
+        }
+    }
+
+    if query_future.await.is_ok() && features.contains(Features::TIMESTAMP_QUERY) {
+        let ts_period = queue.get_timestamp_period();
+        let ts_data_raw = &*query_slice.get_mapped_range();
+        let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
+        println!(
+            "Compute shader elapsed: {:?}ms",
+            (ts_data[1] - ts_data[0]) as f64 * ts_period as f64 * 1e-6
+        );
+    }
+
+    match buffer_future.await {
+        Ok(()) => {
+            let padded_data = buffer_slice.get_mapped_range();
+            let mut pixels: Vec<u8> =
+                vec![0; output_buffer.unpadded_bytes_per_row * height as usize];
+            for (padded, pixels) in padded_data
+                .chunks_exact(output_buffer.padded_bytes_per_row)
+                .zip(pixels.chunks_exact_mut(output_buffer.unpadded_bytes_per_row))
+            {
+                pixels.copy_from_slice(&padded[..output_buffer.unpadded_bytes_per_row]);
+            }
+
+            let result = Image::from_raw_pixels((width, height), &pixels);
+
+            Ok(result)
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+pub async fn dither(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> {
+    let (width, height) = image.dimensions;
+
+    let instance = Instance::new(Backends::all());
+    let adapter = instance
+        .request_adapter(&RequestAdapterOptionsBase {
+            power_preference: PowerPreference::HighPerformance,
+            force_fallback_adapter: false,
+            compatible_surface: None,
+        })
+        .await
+        .ok_or_else(|| anyhow::anyhow!("Couldn't create the adapter"))?;
+
+    let features = adapter.features();
+    let (device, queue) = adapter
+        .request_device(
+            &DeviceDescriptor {
+                label: None,
+                features: features & (Features::TIMESTAMP_QUERY),
+                limits: Default::default(),
+            },
+            None,
+        )
+        .await?;
+
+    let centroids_buffer = CentroidsBuffer::empty_centroids(k, &device);
+
+    let query_set = if features.contains(Features::TIMESTAMP_QUERY) {
+        Some(device.create_query_set(&QuerySetDescriptor {
+            count: 2,
+            ty: QueryType::Timestamp,
+            label: None,
+        }))
+    } else {
+        None
+    };
+    let query_buf = device.create_buffer_init(&BufferInitDescriptor {
+        label: None,
+        contents: &[0; 16],
+        usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+    });
+
+    let input_texture = InputTexture::new(&device, &queue, image);
+    let work_texture = WorkTexture::new(&device, image);
+    let dithered_texture = WorkTexture::new(&device, image);
+    let color_index_texture = ColorIndexTexture::new(&device, image);
+    let output_texture = OutputTexture::new(&device, image);
+
+    let plus_plus_init_module =
+        PlusPlusInitModule::new(image.dimensions, k, &work_texture, &centroids_buffer);
+    let color_converter_module = ColorConverterModule::new(
+        &device,
+        color_space,
+        image.dimensions,
+        &input_texture,
+        &work_texture,
+    );
+    let find_centroid_module = FindCentroidModule::new(
+        &device,
+        image.dimensions,
+        &work_texture,
+        &centroids_buffer,
+        &color_index_texture,
+    );
+    let choose_centroid_module = ChooseCentroidModule::new(
+        &device,
+        color_space,
+        image.dimensions,
+        k,
+        &work_texture,
+        &centroids_buffer,
+        &color_index_texture,
+        &find_centroid_module,
+    );
+    let dither_module = DitherModule::new(
+        &device,
+        image.dimensions,
+        &work_texture,
+        &dithered_texture,
+        &color_index_texture,
+        &centroids_buffer,
+    );
+    let color_reverter_module = ColorReverterModule::new(
+        &device,
+        color_space,
+        image.dimensions,
+        &dithered_texture,
+        &output_texture,
+    );
+
+    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
+    if let Some(query_set) = &query_set {
+        encoder.write_timestamp(query_set, 0);
+    }
+
+    {
+        let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+            label: Some("Init pass"),
+        });
+        color_converter_module.dispatch(&mut compute_pass);
+    }
+    queue.submit(Some(encoder.finish()));
+
+    plus_plus_init_module.compute(&device, &queue).await;
+
+    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
+    {
+        let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+            label: Some("Init pass"),
+        });
+        find_centroid_module.dispatch(&mut compute_pass);
+    }
+
+    queue.submit(Some(encoder.finish()));
+
+    choose_centroid_module.compute(&device, &queue).await;
+
+    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
+    {
+        let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+            label: Some("Swap and fetch result pass"),
+        });
+        dither_module.dispatch(&mut compute_pass);
+        color_reverter_module.dispatch(&mut compute_pass);
+    }
+    if let Some(query_set) = &query_set {
+        encoder.write_timestamp(query_set, 1);
+    }
+
+    let staging_buffer = centroids_buffer.staging_buffer(&device, &mut encoder);
+
+    let output_buffer = output_texture.output_buffer(&device, &mut encoder);
+
+    if let Some(query_set) = &query_set {
+        encoder.resolve_query_set(query_set, 0..2, &query_buf, 0);
+    }
+    queue.submit(Some(encoder.finish()));
+
+    let buffer_slice = output_buffer.slice(..);
+    let buffer_future = buffer_slice.map_async(MapMode::Read);
+
+    let cent_buffer_slice = staging_buffer.slice(..);
     let cent_buffer_future = cent_buffer_slice.map_async(MapMode::Read);
 
     let query_slice = query_buf.slice(..);

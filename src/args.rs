@@ -66,6 +66,24 @@ pub enum Commands {
         #[clap(short, long="colorspace", default_value_t=ColorSpace::Lab)]
         color_space: ColorSpace,
     },
+    /// Quantized the image with kmeans, then dithers it with the reduced colors.
+    Dither {
+        /// K value, aka the number of colors we want to extract
+        #[clap(short, validator = validate_k_for_dithering)]
+        k: u32,
+        /// Input file
+        #[clap(short, long, validator = validate_filenames, parse(from_os_str))]
+        input: PathBuf,
+        /// Optional output file
+        #[clap(short, long, parse(from_os_str))]
+        output: Option<PathBuf>,
+        /// Optional extension to use if an output file is not specified
+        #[clap(short, long)]
+        extension: Option<Extension>,
+        /// The colorspace to use when calculating colors. Lab gives more natural colors
+        #[clap(short, long="colorspace", default_value_t=ColorSpace::Lab)]
+        color_space: ColorSpace,
+    },
 }
 
 #[derive(Debug)]
@@ -114,8 +132,21 @@ fn validate_k(s: &str) -> Result<()> {
     }
 }
 
+fn validate_k_for_dithering(s: &str) -> Result<()> {
+    match s.parse::<u32>() {
+        Ok(k) => {
+            if k >= 2 {
+                Ok(())
+            } else {
+                Err(anyhow!("k must be an integer, minimum 2."))
+            }
+        }
+        Err(_) => Err(anyhow!("k must be an integer, minimum 2.")),
+    }
+}
+
 fn validate_filenames(s: &str) -> Result<()> {
-    if s.ends_with(".png") || s.ends_with(".jpg") {
+    if s.len() > 4 && s.ends_with(".png") || s.ends_with(".jpg") {
         Ok(())
     } else {
         Err(anyhow!("Only support png or jpg files."))
@@ -130,5 +161,34 @@ fn validate_replacement(s: &str) -> Result<()> {
         Err(anyhow!(
             "Replacement colors should be chained like #ffaa12,#fe7845,#aabbff"
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // Note this useful idiom: importing names from outer (for mod tests) scope.
+    use super::*;
+
+    #[test]
+    fn test_validate_replacement() {
+        assert!(validate_replacement("#ffffff,#000000").is_ok());
+        assert!(validate_replacement("#ffffff#000000").is_err());
+        assert!(validate_replacement("").is_err());
+    }
+
+    #[test]
+    fn test_validate_k() {
+        assert!(validate_k("1").is_ok());
+        assert!(validate_k("150").is_ok());
+        assert!(validate_k("abs").is_err());
+        assert!(validate_k("0").is_err());
+    }
+
+    #[test]
+    fn test_validate_filename() {
+        assert!(validate_filenames("jog.png").is_ok());
+        assert!(validate_filenames("jog.jpg").is_ok());
+        assert!(validate_filenames("jog.pom").is_err());
+        assert!(validate_filenames(".png").is_err());
     }
 }

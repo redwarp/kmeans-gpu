@@ -1111,3 +1111,93 @@ impl<'a> PlusPlusInitModule<'a> {
         }
     }
 }
+
+pub(crate) struct DitherModule {
+    pipeline: ComputePipeline,
+    bind_group: BindGroup,
+    dispatch_size: (u32, u32),
+}
+
+impl DitherModule {
+    pub fn new(
+        device: &Device,
+        image_dimensions: (u32, u32),
+        input_texture: &WorkTexture,
+        output_texture: &WorkTexture,
+        color_index_texture: &ColorIndexTexture,
+        centroids_buffer: &CentroidsBuffer,
+    ) -> Self {
+        let shader_module = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+            label: Some("Dither shader"),
+            source: ShaderSource::Wgsl(include_str!("shaders/ordered_dithering.wgsl").into()),
+        });
+
+        let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("Dither bind group layout"),
+            entries: &[
+                WorkTexture::texture_2d_layout(0),
+                WorkTexture::texture_storage_layout(1),
+                ColorIndexTexture::texture_2d_layout(2),
+                CentroidsBuffer::layout(3, true),
+            ],
+        });
+
+        let bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Dither bind group"),
+            layout: &bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(
+                        &input_texture.create_view(&TextureViewDescriptor::default()),
+                    ),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(
+                        &output_texture.create_view(&TextureViewDescriptor::default()),
+                    ),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(
+                        &color_index_texture.create_view(&TextureViewDescriptor::default()),
+                    ),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: centroids_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("Dither pipeline layout"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("Dither pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader_module,
+            entry_point: "main",
+        });
+
+        let dispatch_size = compute_work_group_count(image_dimensions, (16, 16));
+
+        Self {
+            pipeline,
+            bind_group,
+            dispatch_size,
+        }
+    }
+}
+
+impl Module for DitherModule {
+    fn dispatch<'a>(&'a self, compute_pass: &mut ComputePass<'a>) {
+        compute_pass.set_pipeline(&self.pipeline);
+        compute_pass.set_bind_group(0, &self.bind_group, &[]);
+        compute_pass.dispatch(self.dispatch_size.0, self.dispatch_size.1, 1);
+    }
+}

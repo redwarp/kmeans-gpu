@@ -8,7 +8,7 @@ use anyhow::{Ok, Result};
 use args::{Cli, Commands, Extension};
 use clap::Parser;
 use image::{ImageBuffer, Rgba};
-use k_means_gpu::{find, kmeans, palette, ColorSpace, Image};
+use k_means_gpu::{dither, find, kmeans, palette, ColorSpace, Image};
 use pollster::FutureExt;
 
 mod args;
@@ -38,6 +38,13 @@ fn main() -> Result<()> {
             replacement,
             color_space,
         } => find_subcommand(input, output, replacement, color_space).block_on(),
+        Commands::Dither {
+            k,
+            input,
+            output,
+            extension,
+            color_space,
+        } => dither_subcommand(k, input, output, extension, color_space).block_on(),
     }?;
 
     Ok(())
@@ -58,7 +65,7 @@ async fn kmeans_subcommand(
     if let Some(output_image) =
         ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, result.into_raw_pixels())
     {
-        let output_file = output_file(k, &output, &input, &extension, &color_space)?;
+        let output_file = output_file(k, "kmeans", &output, &input, &extension, &color_space)?;
         output_image.save(output_file)?;
     }
 
@@ -113,8 +120,31 @@ async fn find_subcommand(
     Ok(())
 }
 
+async fn dither_subcommand(
+    k: u32,
+    input: PathBuf,
+    output: Option<PathBuf>,
+    extension: Option<Extension>,
+    color_space: ColorSpace,
+) -> Result<()> {
+    let image = Image::open(&input)?;
+
+    let result = dither(k, &image, &color_space).await?;
+    let (width, height) = result.dimensions();
+
+    if let Some(output_image) =
+        ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, result.into_raw_pixels())
+    {
+        let output_file = output_file(k, "dither", &output, &input, &extension, &color_space)?;
+        output_image.save(output_file)?;
+    }
+
+    Ok(())
+}
+
 fn output_file(
     k: u32,
+    function: &str,
     output: &Option<PathBuf>,
     input: &Path,
     extension: &Option<Extension>,
@@ -141,7 +171,7 @@ fn output_file(
         let millis = format!("{}{:03}", now.as_secs(), now.subsec_millis());
 
         let filename = format!(
-            "{stem}-{cs}-k{k}-{millis}.{extension}",
+            "{stem}-{function}-{cs}-k{k}-{millis}.{extension}",
             cs = color_space.name()
         );
         let output_path = if let Some(parent) = parent {
