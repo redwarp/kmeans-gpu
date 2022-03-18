@@ -29,11 +29,13 @@ let max_int : u32 = 4294967295u;
 [[group(0), binding(1)]] var pixels: texture_2d<f32>;
 [[group(0), binding(2)]] var<storage, read_write> prefix_buffer: AtomicBuffer;
 [[group(0), binding(3)]] var<storage, read_write> flag_buffer: AtomicBuffer;
+[[group(0), binding(4)]] var<storage, read_write> part_id_buffer : AtomicBuffer;
 [[group(1), binding(0)]] var<uniform> k_index: KIndex;
 
 var<workgroup> scratch: array<Candidate, workgroup_size>;
 var<workgroup> shared_prefix: Candidate;
 var<workgroup> shared_flag: u32;
+var<workgroup> part_id: u32;
 
 fn coords(global_x: u32, dimensions: vec2<i32>) -> vec2<i32> {
     return vec2<i32>(vec2<u32>(global_x % u32(dimensions.x), global_x / u32(dimensions.x)));
@@ -72,17 +74,21 @@ fn rand(seed: f32) -> f32 {
 [[stage(compute), workgroup_size(256)]]
 fn main(
     [[builtin(local_invocation_id)]] local_id : vec3<u32>,
-    [[builtin(workgroup_id)]] workgroup_id : vec3<u32>,
     [[builtin(global_invocation_id)]] global_id : vec3<u32>,
-) {    
-    if (local_id.x == workgroup_size - 1u) {
-        atomicStore(&flag_buffer.data[workgroup_id.x], FLAG_NOT_READY);
+) {  
+    if (local_id.x == 0u) {
+        part_id = atomicAdd(&part_id_buffer.data[0], 1u);
     }
-    storageBarrier();
+    workgroupBarrier();
+    let workgroup_x = part_id;
+      
+    if (local_id.x == workgroup_size - 1u) {
+        atomicStore(&flag_buffer.data[workgroup_x], FLAG_NOT_READY);
+    }
 
     let dimensions = textureDimensions(pixels);
     let width = u32(dimensions.x);
-    let global_x = global_id.x;
+    let global_x = workgroup_x * workgroup_size + local_id.x;
    
     scratch[local_id.x] = Candidate(0u, 0.0);
 
@@ -126,23 +132,23 @@ fn main(
     var flag = FLAG_AGGREGATE_READY;
     
     if (local_id.x == workgroup_size - 1u) {
-        atomicStoreCandidate(workgroup_id.x * 4u + 2u, local);
-        if (workgroup_id.x == 0u) {
+        atomicStoreCandidate(workgroup_x * 4u + 2u, local);
+        if (workgroup_x == 0u) {
             // Special case for group 0.
-            atomicStoreCandidate(workgroup_id.x * 4u + 0u, local);
+            atomicStoreCandidate(workgroup_x * 4u + 0u, local);
             flag = FLAG_PREFIX_READY;
         }
     }
     storageBarrier();
 
     if (local_id.x == workgroup_size - 1u) {
-        atomicStore(&flag_buffer.data[workgroup_id.x], flag);
+        atomicStore(&flag_buffer.data[workgroup_x], flag);
     }
     storageBarrier();
 
-    if(workgroup_id.x != 0u) {
+    if(workgroup_x != 0u) {
         // decoupled loop-back
-        var loop_back_ix = workgroup_id.x - 1u;
+        var loop_back_ix = workgroup_x - 1u;
         loop {
             if(local_id.x == workgroup_size - 1u) {
                 shared_flag = atomicLoad(&flag_buffer.data[loop_back_ix]);
@@ -175,8 +181,8 @@ fn main(
         if (local_id.x == workgroup_size - 1u) {
             shared_prefix = local;
             
-            atomicStoreCandidate(workgroup_id.x * 2u + 0u, local);
-            atomicStore(&flag_buffer.data[workgroup_id.x], FLAG_PREFIX_READY);
+            atomicStoreCandidate(workgroup_x * 2u + 0u, local);
+            atomicStore(&flag_buffer.data[workgroup_x], FLAG_PREFIX_READY);
         }
         workgroupBarrier();
         storageBarrier();
@@ -205,4 +211,7 @@ fn pick() {
     let new_centroid = textureLoad(pixels, centroid_coords, 0);
 
     centroids.data[k_index.k] = new_centroid;
+
+    // Reset part ids for next centroid.
+    atomicStore(&part_id_buffer.data[0], 0u);
 }

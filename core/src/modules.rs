@@ -974,6 +974,16 @@ impl<'a> PlusPlusInitModule<'a> {
                         },
                         count: None,
                     },
+                    BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
                 ],
             });
 
@@ -988,10 +998,16 @@ impl<'a> PlusPlusInitModule<'a> {
             usage: BufferUsages::STORAGE,
             mapped_at_creation: false,
         });
-        let state_buffer_size = dispatch_size * 4;
-        let state_buffer = device.create_buffer(&BufferDescriptor {
+        let flag_buffer_size = (dispatch_size) * 4;
+        let flag_buffer = device.create_buffer(&BufferDescriptor {
             label: None,
-            size: state_buffer_size as BufferAddress,
+            size: flag_buffer_size as BufferAddress,
+            usage: BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        let part_id_buffer = device.create_buffer(&BufferDescriptor {
+            label: None,
+            size: 4,
             usage: BufferUsages::STORAGE,
             mapped_at_creation: false,
         });
@@ -1018,7 +1034,11 @@ impl<'a> PlusPlusInitModule<'a> {
                 },
                 BindGroupEntry {
                     binding: 3,
-                    resource: state_buffer.as_entire_binding(),
+                    resource: flag_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: part_id_buffer.as_entire_binding(),
                 },
             ],
         });
