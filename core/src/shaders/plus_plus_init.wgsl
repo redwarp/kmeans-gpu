@@ -75,20 +75,6 @@ fn main(
     [[builtin(workgroup_id)]] workgroup_id : vec3<u32>,
     [[builtin(global_invocation_id)]] global_id : vec3<u32>,
 ) {    
-    if (k_index.k == 0u) {
-        if (workgroup_id.x == 0u && local_id.x == 0u) {
-            let dimensions = textureDimensions(pixels);
-            let x = i32(f32(dimensions.x) * rand(42.0));
-            let y = i32(f32(dimensions.y) * rand(12.0));
-
-            let new_centroid = textureLoad(pixels, vec2<i32>(x, y), 0);
-
-            centroids.data[k_index.k] = new_centroid;
-        }
-
-        return;
-    }
-
     if (local_id.x == workgroup_size - 1u) {
         atomicStore(&flag_buffer.data[workgroup_id.x], FLAG_NOT_READY);
     }
@@ -196,13 +182,27 @@ fn main(
         storageBarrier();
     }
 
-    if (workgroup_id.x == last_group_idx() & local_id.x == workgroup_size - 1u) {
-        var centroid: Candidate = shared_prefix;
-
-        let centroid_coords = coords(centroid.index, dimensions);
-        let new_centroid = textureLoad(pixels, centroid_coords, 0);
-
-        centroids.data[k_index.k] = new_centroid;
-    }
     storageBarrier();
+}
+
+[[stage(compute), workgroup_size(1)]]
+fn initial() {
+    let dimensions = textureDimensions(pixels);
+    let x = i32(f32(dimensions.x) * rand(42.0));
+    let y = i32(f32(dimensions.y) * rand(12.0));
+
+    let new_centroid = textureLoad(pixels, vec2<i32>(x, y), 0);
+
+    centroids.data[0] = new_centroid;
+}
+
+[[stage(compute), workgroup_size(1)]]
+fn pick() {
+    let dimensions = textureDimensions(pixels);
+    let centroid = atomicLoadCandidate(last_group_idx() * 2u + 0u);
+
+    let centroid_coords = coords(centroid.index, dimensions);
+    let new_centroid = textureLoad(pixels, centroid_coords, 0);
+
+    centroids.data[k_index.k] = new_centroid;
 }

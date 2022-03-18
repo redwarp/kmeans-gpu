@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Result};
-use log::{debug, log_enabled};
 use modules::{
     ChooseCentroidModule, ColorConverterModule, ColorReverterModule, FindCentroidModule,
     MixColorsModule, Module, PlusPlusInitModule, SwapModule,
@@ -595,8 +594,6 @@ pub async fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<I
         encoder.write_timestamp(query_set, 1);
     }
 
-    let staging_buffer = centroids_buffer.staging_buffer(&device, &mut encoder);
-
     let output_buffer = output_texture.output_buffer(&device, &mut encoder);
 
     if let Some(query_set) = &query_set {
@@ -607,25 +604,10 @@ pub async fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<I
     let buffer_slice = output_buffer.slice(..);
     let buffer_future = buffer_slice.map_async(MapMode::Read);
 
-    let cent_buffer_slice = staging_buffer.slice(..);
-    let cent_buffer_future = cent_buffer_slice.map_async(MapMode::Read);
-
     let query_slice = query_buf.slice(..);
     let query_future = query_slice.map_async(MapMode::Read);
 
     device.poll(wgpu::Maintain::Wait);
-
-    if let Ok(()) = cent_buffer_future.await {
-        let data = cent_buffer_slice.get_mapped_range();
-        if log_enabled!(log::Level::Debug) {
-            for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[16..])
-                .chunks_exact(4)
-                .enumerate()
-            {
-                debug!("Centroid {index} = {k:?}")
-            }
-        }
-    }
 
     if query_future.await.is_ok() && features.contains(Features::TIMESTAMP_QUERY) {
         let ts_period = queue.get_timestamp_period();
@@ -788,14 +770,6 @@ pub async fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<
         Ok(()) => {
             let data = cent_buffer_slice.get_mapped_range();
 
-            if log_enabled!(log::Level::Debug) {
-                for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[16..])
-                    .chunks_exact(4)
-                    .enumerate()
-                {
-                    debug!("Centroid {index} = {k:?}")
-                }
-            }
             let mut colors: Vec<_> = bytemuck::cast_slice::<u8, f32>(&data[16..])
                 .chunks_exact(4)
                 .map(|color| {
@@ -920,8 +894,6 @@ pub async fn find(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -
 
     let output_buffer = output_texture.output_buffer(&device, &mut encoder);
 
-    let centroids_staging_buffer = centroids.staging_buffer(&device, &mut encoder);
-
     if let Some(query_set) = &query_set {
         encoder.resolve_query_set(query_set, 0..2, &query_buf, 0);
     }
@@ -930,25 +902,10 @@ pub async fn find(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -
     let buffer_slice = output_buffer.slice(..);
     let buffer_future = buffer_slice.map_async(MapMode::Read);
 
-    let cent_buffer_slice = centroids_staging_buffer.slice(..);
-    let cent_buffer_future = cent_buffer_slice.map_async(MapMode::Read);
-
     let query_slice = query_buf.slice(..);
     let query_future = query_slice.map_async(MapMode::Read);
 
     device.poll(wgpu::Maintain::Wait);
-
-    if let Ok(()) = cent_buffer_future.await {
-        let data = cent_buffer_slice.get_mapped_range();
-        if log_enabled!(log::Level::Debug) {
-            for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[16..])
-                .chunks_exact(4)
-                .enumerate()
-            {
-                debug!("Centroid {index} = {k:?}")
-            }
-        }
-    }
 
     if query_future.await.is_ok() && features.contains(Features::TIMESTAMP_QUERY) {
         let ts_period = queue.get_timestamp_period();
@@ -1066,7 +1023,7 @@ pub async fn mix(
         &dithered_texture,
         &color_index_texture,
         &centroids_buffer,
-        &mix_mode,
+        mix_mode,
     );
     let color_reverter_module = ColorReverterModule::new(
         &device,
@@ -1115,8 +1072,6 @@ pub async fn mix(
         encoder.write_timestamp(query_set, 1);
     }
 
-    let staging_buffer = centroids_buffer.staging_buffer(&device, &mut encoder);
-
     let output_buffer = output_texture.output_buffer(&device, &mut encoder);
 
     if let Some(query_set) = &query_set {
@@ -1127,25 +1082,10 @@ pub async fn mix(
     let buffer_slice = output_buffer.slice(..);
     let buffer_future = buffer_slice.map_async(MapMode::Read);
 
-    let cent_buffer_slice = staging_buffer.slice(..);
-    let cent_buffer_future = cent_buffer_slice.map_async(MapMode::Read);
-
     let query_slice = query_buf.slice(..);
     let query_future = query_slice.map_async(MapMode::Read);
 
     device.poll(wgpu::Maintain::Wait);
-
-    if let Ok(()) = cent_buffer_future.await {
-        let data = cent_buffer_slice.get_mapped_range();
-        if log_enabled!(log::Level::Debug) {
-            for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[16..])
-                .chunks_exact(4)
-                .enumerate()
-            {
-                debug!("Centroid {index} = {k:?}")
-            }
-        }
-    }
 
     if query_future.await.is_ok() && features.contains(Features::TIMESTAMP_QUERY) {
         let ts_period = queue.get_timestamp_period();

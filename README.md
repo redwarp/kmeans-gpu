@@ -63,6 +63,8 @@ I had to read a bunch of stuff to even start to make sense of it all.
 * About dithering:
   + https://en.wikipedia.org/wiki/Ordered_dithering
   + http://alex-charlton.com/posts/Dithering_on_the_GPU/
+* Resources:
+  + Resurrect 64 color palette by [Kerrie Lake](https://lospec.com/kerrielake).
 
 ## License
 

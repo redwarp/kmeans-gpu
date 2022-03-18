@@ -499,6 +499,7 @@ pub(crate) struct ChooseCentroidModule<'a> {
     dispatch_size: u32,
     convergence_buffer: ConvergenceBuffer,
     find_centroid_module: &'a FindCentroidModule,
+    centroid_buffer: &'a CentroidsBuffer,
 }
 
 impl<'a> ChooseCentroidModule<'a> {
@@ -509,7 +510,7 @@ impl<'a> ChooseCentroidModule<'a> {
         image_dimensions: (u32, u32),
         k: u32,
         work_texture: &WorkTexture,
-        centroid_buffer: &CentroidsBuffer,
+        centroid_buffer: &'a CentroidsBuffer,
         color_index_texture: &ColorIndexTexture,
         find_centroid_module: &'a FindCentroidModule,
     ) -> Self {
@@ -760,6 +761,7 @@ impl<'a> ChooseCentroidModule<'a> {
                 mapped_buffer: check_convergence_buffer,
             },
             find_centroid_module,
+            centroid_buffer,
         }
     }
 
@@ -855,7 +857,7 @@ impl<'a> ChooseCentroidModule<'a> {
                     .to_vec();
                     if convergence_data[self.k as usize] >= self.k {
                         // We converged, time to go.
-                        println!("We have convergence, checked at iteration {iteration}");
+                        debug!("We have convergence, checked at iteration {iteration}");
                         break;
                     }
                 }
@@ -863,6 +865,35 @@ impl<'a> ChooseCentroidModule<'a> {
             };
 
             self.convergence_buffer.mapped_buffer.unmap();
+        }
+
+        if log_enabled!(log::Level::Debug) {
+            debug!("== Final centroids: ====");
+            let mut encoder =
+                device.create_command_encoder(&CommandEncoderDescriptor { label: None });
+
+            let staging_buffer = self.centroid_buffer.staging_buffer(device, &mut encoder);
+
+            queue.submit(Some(encoder.finish()));
+            let cent_buffer_slice = staging_buffer.slice(..);
+            let cent_buffer_future = cent_buffer_slice.map_async(MapMode::Read);
+
+            device.poll(wgpu::Maintain::Wait);
+
+            if let Ok(()) = cent_buffer_future.await {
+                let data = cent_buffer_slice.get_mapped_range();
+
+                for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[16..])
+                    .chunks_exact(4)
+                    .enumerate()
+                {
+                    debug!("Centroid {index} = {k:?}")
+                }
+            }
+
+            debug!("========================");
+
+            staging_buffer.unmap();
         }
     }
 }
@@ -1042,11 +1073,23 @@ impl<'a> PlusPlusInitModule<'a> {
                 ],
                 push_constant_ranges: &[],
             });
+        let initial_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("Choose centroid pipeline"),
+            layout: Some(&choose_centroid_pipeline_layout),
+            module: &choose_centroid_shader,
+            entry_point: "initial",
+        });
         let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("Choose centroid pipeline"),
             layout: Some(&choose_centroid_pipeline_layout),
             module: &choose_centroid_shader,
             entry_point: "main",
+        });
+        let pick_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("Choose centroid pipeline"),
+            layout: Some(&choose_centroid_pipeline_layout),
+            module: &choose_centroid_shader,
+            entry_point: "pick",
         });
 
         let centroid_size = (self.k as u64 + 1) * 16;
@@ -1066,11 +1109,18 @@ impl<'a> PlusPlusInitModule<'a> {
                 let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
                     label: Some("Plus plus init pass"),
                 });
-                compute_pass.set_pipeline(&pipeline);
                 compute_pass.set_bind_group(0, &bind_group, &[]);
                 for k in k_start..max_k {
                     compute_pass.set_bind_group(1, &bind_groups[k as usize], &[]);
-                    compute_pass.dispatch(dispatch_size, 1, 1);
+                    if k == 0 {
+                        compute_pass.set_pipeline(&initial_pipeline);
+                        compute_pass.dispatch(1, 1, 1);
+                    } else {
+                        compute_pass.set_pipeline(&pipeline);
+                        compute_pass.dispatch(dispatch_size, 1, 1);
+                        compute_pass.set_pipeline(&pick_pipeline);
+                        compute_pass.dispatch(1, 1, 1);
+                    }
                 }
             }
 
@@ -1079,7 +1129,7 @@ impl<'a> PlusPlusInitModule<'a> {
         }
 
         if log_enabled!(log::Level::Debug) {
-            debug!("Initial centroids:");
+            debug!("== Initial centroids: ==");
             let mut encoder =
                 device.create_command_encoder(&CommandEncoderDescriptor { label: None });
             encoder.copy_buffer_to_buffer(
@@ -1106,6 +1156,7 @@ impl<'a> PlusPlusInitModule<'a> {
                     debug!("Centroid {index} = {k:?}")
                 }
             }
+            debug!("========================");
 
             staging_buffer.unmap();
         }
