@@ -74,7 +74,7 @@ impl ColorSpace {
 
     pub fn convergence(&self) -> f32 {
         match self {
-            ColorSpace::Lab => 0.75,
+            ColorSpace::Lab => 1.0,
             ColorSpace::Rgb => 0.01,
         }
     }

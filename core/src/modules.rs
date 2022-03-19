@@ -1,6 +1,5 @@
-use std::num::NonZeroU32;
-
 use log::{debug, log_enabled};
+use std::num::NonZeroU32;
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
@@ -493,6 +492,7 @@ pub(crate) struct ConvergenceBuffer {
 pub(crate) struct ChooseCentroidModule<'a> {
     k: u32,
     pipeline: ComputePipeline,
+    pick_pipeline: ComputePipeline,
     bind_group_0: BindGroup,
     bind_group_1: BindGroup,
     bind_groups: Vec<BindGroup>,
@@ -555,8 +555,26 @@ impl<'a> ChooseCentroidModule<'a> {
                         },
                         count: None,
                     },
+                    BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
                 ],
             });
+
+        let part_id_buffer = device.create_buffer(&BufferDescriptor {
+            label: None,
+            size: 4,
+            usage: BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+
         let choose_centroid_bind_group_0 = device.create_bind_group(&BindGroupDescriptor {
             label: None,
             layout: &choose_centroid_bind_group_0_layout,
@@ -576,6 +594,10 @@ impl<'a> ChooseCentroidModule<'a> {
                     resource: BindingResource::TextureView(
                         &work_texture.create_view(&TextureViewDescriptor::default()),
                     ),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: part_id_buffer.as_entire_binding(),
                 },
             ],
         });
@@ -601,10 +623,10 @@ impl<'a> ChooseCentroidModule<'a> {
             usage: BufferUsages::STORAGE,
             mapped_at_creation: false,
         });
-        let state_buffer_size = dispatch_size * 4;
-        let state_buffer = device.create_buffer(&BufferDescriptor {
+        let flag_buffer_size = dispatch_size * 4;
+        let flag_buffer = device.create_buffer(&BufferDescriptor {
             label: None,
-            size: state_buffer_size as BufferAddress,
+            size: flag_buffer_size as BufferAddress,
             usage: BufferUsages::STORAGE,
             mapped_at_creation: false,
         });
@@ -678,7 +700,7 @@ impl<'a> ChooseCentroidModule<'a> {
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: state_buffer.as_entire_binding(),
+                    resource: flag_buffer.as_entire_binding(),
                 },
                 BindGroupEntry {
                     binding: 2,
@@ -749,9 +771,17 @@ impl<'a> ChooseCentroidModule<'a> {
             entry_point: "main",
         });
 
+        let pick_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("Choose centroid pipeline"),
+            layout: Some(&choose_centroid_pipeline_layout),
+            module: &choose_centroid_shader,
+            entry_point: "pick",
+        });
+
         Self {
             k,
             pipeline,
+            pick_pipeline,
             bind_group_0: choose_centroid_bind_group_0,
             bind_group_1: choose_centroid_bind_group_1,
             bind_groups,
@@ -769,106 +799,82 @@ impl<'a> ChooseCentroidModule<'a> {
         let max_obs_chain = 32;
         let max_iteration = 128;
         let max_step_before_convergence_check = 8;
-        let mut iteration = 0;
-        let mut op_count;
-        let mut current_k = 0;
-        let mut current_step = 0;
+        let mut current_iteration = 0;
 
-        'iteration: loop {
-            op_count = 0;
+        println!("Dispatch size {}", self.dispatch_size);
+
+        'iteration: for iteration in 0..max_iteration {
+            current_iteration = iteration;
+            for k_start in (0..self.k as usize).step_by(max_obs_chain) {
+                let max_k = (k_start + max_obs_chain).min(self.k as usize);
+
+                let mut encoder =
+                    device.create_command_encoder(&CommandEncoderDescriptor { label: None });
+                let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                    label: Some("Choose centroid pass"),
+                });
+                compute_pass.set_bind_group(0, &self.bind_group_0, &[]);
+                compute_pass.set_bind_group(1, &self.bind_group_1, &[]);
+                for k in k_start..max_k {
+                    compute_pass.set_bind_group(2, &self.bind_groups[k as usize], &[]);
+                    compute_pass.set_pipeline(&self.pipeline);
+                    compute_pass.dispatch(self.dispatch_size, 1, 1);
+                    compute_pass.set_pipeline(&self.pick_pipeline);
+                    compute_pass.dispatch(1, 1, 1);
+                }
+                drop(compute_pass);
+                queue.submit(Some(encoder.finish()));
+
+                device.poll(wgpu::Maintain::Wait);
+            }
+
             let mut encoder =
                 device.create_command_encoder(&CommandEncoderDescriptor { label: None });
+            {
+                let mut compute_pass =
+                    encoder.begin_compute_pass(&ComputePassDescriptor { label: None });
 
-            let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                label: Some("Choose centroid pass"),
-            });
-            compute_pass.set_pipeline(&self.pipeline);
-            compute_pass.set_bind_group(0, &self.bind_group_0, &[]);
-            compute_pass.set_bind_group(1, &self.bind_group_1, &[]);
+                self.find_centroid_module.dispatch(&mut compute_pass);
+            }
 
-            #[allow(clippy::mut_range_bound)]
-            for step in current_step..max_step_before_convergence_check {
-                for k in current_k..self.k {
-                    compute_pass.set_bind_group(2, &self.bind_groups[k as usize], &[]);
-                    compute_pass.dispatch(self.dispatch_size, 1, 1);
-                    op_count += 1;
+            if iteration > 0 && iteration % max_step_before_convergence_check == 0 {
+                encoder.copy_buffer_to_buffer(
+                    &self.convergence_buffer.gpu_buffer,
+                    0,
+                    &self.convergence_buffer.mapped_buffer,
+                    0,
+                    (self.k + 1) as u64 * 4,
+                );
 
-                    #[allow(clippy::mut_range_bound)]
-                    if op_count >= max_obs_chain {
-                        current_k = k + 1;
-                        current_step = step;
-                        break;
-                    }
-                }
+                queue.submit(Some(encoder.finish()));
+                let check_convergence_slice = self.convergence_buffer.mapped_buffer.slice(..);
+                let check_convergence_future = check_convergence_slice.map_async(MapMode::Read);
 
-                if op_count >= max_obs_chain {
-                    if current_k == self.k {
-                        // We actually finished this step.
-                        iteration += 1;
-                        current_step += 1;
+                device.poll(wgpu::Maintain::Wait);
 
-                        if iteration >= max_iteration {
+                match check_convergence_future.await {
+                    Ok(_) => {
+                        let convergence_data = bytemuck::cast_slice::<u8, u32>(
+                            &check_convergence_slice.get_mapped_range(),
+                        )
+                        .to_vec();
+                        if convergence_data[self.k as usize] >= self.k {
+                            // We converged, time to go.
+                            debug!("We have convergence, checked at iteration {iteration}");
                             break 'iteration;
                         }
                     }
+                    Err(_) => break 'iteration,
+                };
 
-                    drop(compute_pass);
-                    queue.submit(Some(encoder.finish()));
-                    continue 'iteration;
-                } else {
-                    current_k = 0;
-                }
-
-                self.find_centroid_module.dispatch(&mut compute_pass);
-
-                iteration += 1;
-                current_step += 1;
-
-                if iteration >= max_iteration {
-                    break 'iteration;
-                } else {
-                    compute_pass.set_pipeline(&self.pipeline);
-                    compute_pass.set_bind_group(0, &self.bind_group_0, &[]);
-                    compute_pass.set_bind_group(1, &self.bind_group_1, &[]);
-                }
+                self.convergence_buffer.mapped_buffer.unmap();
+            } else {
+                queue.submit(Some(encoder.finish()));
             }
-            current_step = 0;
-            drop(compute_pass);
-            encoder.copy_buffer_to_buffer(
-                &self.convergence_buffer.gpu_buffer,
-                0,
-                &self.convergence_buffer.mapped_buffer,
-                0,
-                (self.k + 1) as u64 * 4,
-            );
-
-            queue.submit(Some(encoder.finish()));
-
-            let check_convergence_slice = self.convergence_buffer.mapped_buffer.slice(..);
-            let check_convergence_future = check_convergence_slice.map_async(MapMode::Read);
-
-            device.poll(wgpu::Maintain::Wait);
-
-            match check_convergence_future.await {
-                Ok(_) => {
-                    let convergence_data = bytemuck::cast_slice::<u8, u32>(
-                        &check_convergence_slice.get_mapped_range(),
-                    )
-                    .to_vec();
-                    if convergence_data[self.k as usize] >= self.k {
-                        // We converged, time to go.
-                        debug!("We have convergence, checked at iteration {iteration}");
-                        break;
-                    }
-                }
-                Err(_) => break 'iteration,
-            };
-
-            self.convergence_buffer.mapped_buffer.unmap();
         }
 
         if log_enabled!(log::Level::Debug) {
-            debug!("== Final centroids: ====");
+            debug!("== Final centroids at iteration {current_iteration}: ==");
             let mut encoder =
                 device.create_command_encoder(&CommandEncoderDescriptor { label: None });
 
@@ -890,10 +896,8 @@ impl<'a> ChooseCentroidModule<'a> {
                     debug!("Centroid {index} = {k:?}")
                 }
             }
-
-            debug!("========================");
-
             staging_buffer.unmap();
+            debug!("========================");
         }
     }
 }

@@ -74,7 +74,6 @@ fn rand(seed: f32) -> f32 {
 [[stage(compute), workgroup_size(256)]]
 fn main(
     [[builtin(local_invocation_id)]] local_id : vec3<u32>,
-    [[builtin(global_invocation_id)]] global_id : vec3<u32>,
 ) {  
     if (local_id.x == 0u) {
         part_id = atomicAdd(&part_id_buffer.data[0], 1u);
