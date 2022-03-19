@@ -796,20 +796,20 @@ impl<'a> ChooseCentroidModule<'a> {
     }
 
     pub(crate) async fn compute(&self, device: &Device, queue: &Queue) {
-        let max_obs_chain = 32;
-        let max_iteration = 128;
-        let max_step_before_convergence_check = 8;
+        const MAX_OBS_CHAIN: usize = 64;
+        const MAX_ITERATION: u32 = 128;
+        const MAX_ITERATION_BEFORE_CONVERGENCE_CHECK: u32 = 8;
         let mut current_iteration = 0;
 
         println!("Dispatch size {}", self.dispatch_size);
 
-        'iteration: for iteration in 0..max_iteration {
+        'iteration: for iteration in 0..MAX_ITERATION {
             current_iteration = iteration;
-            for k_start in (0..self.k as usize).step_by(max_obs_chain) {
-                let max_k = (k_start + max_obs_chain).min(self.k as usize);
+            let mut encoder =
+                device.create_command_encoder(&CommandEncoderDescriptor { label: None });
+            for k_start in (0..self.k as usize).step_by(MAX_OBS_CHAIN) {
+                let max_k = (k_start + MAX_OBS_CHAIN).min(self.k as usize);
 
-                let mut encoder =
-                    device.create_command_encoder(&CommandEncoderDescriptor { label: None });
                 let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
                     label: Some("Choose centroid pass"),
                 });
@@ -822,11 +822,10 @@ impl<'a> ChooseCentroidModule<'a> {
                     compute_pass.set_pipeline(&self.pick_pipeline);
                     compute_pass.dispatch(1, 1, 1);
                 }
-                drop(compute_pass);
-                queue.submit(Some(encoder.finish()));
-
-                device.poll(wgpu::Maintain::Wait);
             }
+
+            queue.submit(Some(encoder.finish()));
+            device.poll(wgpu::Maintain::Wait);
 
             let mut encoder =
                 device.create_command_encoder(&CommandEncoderDescriptor { label: None });
@@ -837,7 +836,7 @@ impl<'a> ChooseCentroidModule<'a> {
                 self.find_centroid_module.dispatch(&mut compute_pass);
             }
 
-            if iteration > 0 && iteration % max_step_before_convergence_check == 0 {
+            if iteration > 0 && iteration % MAX_ITERATION_BEFORE_CONVERGENCE_CHECK == 0 {
                 encoder.copy_buffer_to_buffer(
                     &self.convergence_buffer.gpu_buffer,
                     0,
