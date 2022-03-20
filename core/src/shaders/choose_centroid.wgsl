@@ -46,9 +46,7 @@ fn last_group_idx() -> u32 {
 }
 
 fn in_bounds(global_x: u32, dimensions: vec2<i32>) -> bool {
-    let x = global_x % u32(dimensions.x);
-    let y = global_x / u32(dimensions.x);
-    return x < u32(dimensions.x) && y < u32(dimensions.y);
+    return global_x < u32(dimensions.x) * u32(dimensions.y);
 }
 
 fn match_centroid(k: u32, global_x: u32, width: u32) -> bool {

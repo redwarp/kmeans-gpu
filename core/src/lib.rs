@@ -190,7 +190,7 @@ impl WorkTexture {
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba16Float,
+            format: TextureFormat::Rgba32Float,
             usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
         });
 
@@ -216,7 +216,7 @@ impl WorkTexture {
             visibility: ShaderStages::COMPUTE,
             ty: BindingType::StorageTexture {
                 access: StorageTextureAccess::WriteOnly,
-                format: TextureFormat::Rgba16Float,
+                format: TextureFormat::Rgba32Float,
                 view_dimension: TextureViewDimension::D2,
             },
             count: None,

@@ -38,7 +38,7 @@ impl ColorConverterModule {
             source: ShaderSource::Wgsl(
                 match color_space {
                     ColorSpace::Lab => include_str!("shaders/converters/rgb_to_lab.wgsl"),
-                    ColorSpace::Rgb => include_str!("shaders/converters/rgb8u_to_rgb16f.wgsl"),
+                    ColorSpace::Rgb => include_str!("shaders/converters/rgb8u_to_rgb32f.wgsl"),
                 }
                 .into(),
             ),
@@ -58,16 +58,7 @@ impl ColorConverterModule {
                         },
                         count: None,
                     },
-                    BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::StorageTexture {
-                            access: StorageTextureAccess::WriteOnly,
-                            format: TextureFormat::Rgba16Float,
-                            view_dimension: TextureViewDimension::D2,
-                        },
-                        count: None,
-                    },
+                    WorkTexture::texture_storage_layout(1),
                 ],
             });
 
@@ -105,17 +96,9 @@ impl ColorConverterModule {
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::TextureView(&work_texture.create_view(
-                        &TextureViewDescriptor {
-                            label: None,
-                            format: Some(TextureFormat::Rgba16Float),
-                            aspect: wgpu::TextureAspect::All,
-                            base_mip_level: 0,
-                            mip_level_count: NonZeroU32::new(1),
-                            dimension: Some(TextureViewDimension::D2),
-                            ..Default::default()
-                        },
-                    )),
+                    resource: BindingResource::TextureView(
+                        &work_texture.create_view(&TextureViewDescriptor::default()),
+                    ),
                 },
             ],
         });
@@ -210,17 +193,9 @@ impl ColorReverterModule {
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: BindingResource::TextureView(&work_texture.create_view(
-                        &TextureViewDescriptor {
-                            label: None,
-                            format: Some(TextureFormat::Rgba16Float),
-                            aspect: wgpu::TextureAspect::All,
-                            base_mip_level: 0,
-                            mip_level_count: NonZeroU32::new(1),
-                            dimension: Some(TextureViewDimension::D2),
-                            ..Default::default()
-                        },
-                    )),
+                    resource: BindingResource::TextureView(
+                        &work_texture.create_view(&TextureViewDescriptor::default()),
+                    ),
                 },
                 BindGroupEntry {
                     binding: 1,
@@ -299,16 +274,7 @@ impl SwapModule {
                     },
                     count: None,
                 },
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
-                        format: TextureFormat::Rgba16Float,
-                        view_dimension: TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
+                WorkTexture::texture_storage_layout(2),
             ],
         });
 
@@ -441,17 +407,9 @@ impl FindCentroidModule {
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: BindingResource::TextureView(&work_texture.create_view(
-                        &TextureViewDescriptor {
-                            label: None,
-                            format: Some(TextureFormat::Rgba16Float),
-                            aspect: wgpu::TextureAspect::All,
-                            base_mip_level: 0,
-                            mip_level_count: NonZeroU32::new(1),
-                            dimension: Some(TextureViewDimension::D2),
-                            ..Default::default()
-                        },
-                    )),
+                    resource: BindingResource::TextureView(
+                        &work_texture.create_view(&TextureViewDescriptor::default()),
+                    ),
                 },
                 BindGroupEntry {
                     binding: 1,

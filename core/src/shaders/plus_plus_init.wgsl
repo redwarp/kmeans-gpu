@@ -46,9 +46,7 @@ fn last_group_idx() -> u32 {
 }
 
 fn in_bounds(global_x: u32, dimensions: vec2<i32>) -> bool {
-    let x = global_x % u32(dimensions.x);
-    let y = global_x / u32(dimensions.x);
-    return x < u32(dimensions.x) && y < u32(dimensions.y);
+    return global_x < u32(dimensions.x) * u32(dimensions.y);
 }
 
 fn atomicStoreCandidate(index: u32, value: Candidate) {
@@ -61,10 +59,6 @@ fn atomicLoadCandidate(index: u32) -> Candidate {
     output.index = atomicLoad(&prefix_buffer.data[index + 0u]);
     output.distance = bitcast<f32>(atomicLoad(&prefix_buffer.data[index + 1u]));
     return output;
-}
-
-fn my_dist(a: vec3<f32>, b: vec3<f32>) -> f32 {
-    return pow(a.r - b.r, 2.0) + pow(a.g - b.g, 2.0) + pow(a.b - b.b, 2.0);
 }
 
 fn rand(seed: f32) -> f32 {
@@ -88,8 +82,6 @@ fn main(
     let dimensions = textureDimensions(pixels);
     let width = u32(dimensions.x);
     let global_x = workgroup_x * workgroup_size + local_id.x;
-   
-    scratch[local_id.x] = Candidate(0u, 0.0);
 
     var local = Candidate(0u, 0.0);
 
@@ -97,23 +89,24 @@ fn main(
         let pixel_index = global_x * N_SEQ + i;
 
         let in_bounds = in_bounds(pixel_index, dimensions);
-        let color = textureLoad(pixels, coords(pixel_index, dimensions), 0).rgb;
-        var min_index: u32 = 0u;
-        var min_diff: f32 = max_f32;
-        for(var k: u32 = 0u; k < k_index.k; k = k + 1u) {
-            let k_diff = my_dist(color, centroids.data[k].rgb);
-            let smaller = in_bounds && (min_diff > k_diff);
-            min_diff = select(min_diff, k_diff, smaller);
-            min_index = select(min_index, pixel_index, smaller);
-        }
+        if (in_bounds){
+            let color = textureLoad(pixels, coords(pixel_index, dimensions), 0).rgb;
+            var min_index: u32 = 0u;
+            var min_diff: f32 = max_f32;
+            for(var k: u32 = 0u; k < k_index.k; k = k + 1u) {
+                let k_diff = distance(color, centroids.data[k].rgb);
+                let smaller = min_diff > k_diff;
+                min_diff = select(min_diff, k_diff, smaller);
+                min_index = select(min_index, pixel_index, smaller);
+            }
 
-        let smaller = in_bounds && local.distance <= min_diff;
-        local.distance = select(local.distance, min_diff, smaller);
-        local.index = select(local.index, min_index, smaller);
+            let smaller = local.distance <= min_diff;
+            local.distance = select(local.distance, min_diff, smaller);
+            local.index = select(local.index, min_index, smaller);
+        }
     }
 
     scratch[local_id.x] = local;
-
     workgroupBarrier();
     
     for (var i: u32 = 0u; i < 8u; i = i + 1u) {
@@ -183,11 +176,7 @@ fn main(
             atomicStoreCandidate(workgroup_x * 2u + 0u, local);
             atomicStore(&flag_buffer.data[workgroup_x], FLAG_PREFIX_READY);
         }
-        workgroupBarrier();
-        storageBarrier();
     }
-
-    storageBarrier();
 }
 
 [[stage(compute), workgroup_size(1)]]
