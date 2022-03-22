@@ -20,7 +20,7 @@ struct Candidate {
 let FLAG_NOT_READY = 0u;
 let FLAG_AGGREGATE_READY = 1u;
 let FLAG_PREFIX_READY = 2u;
-let N_SEQ = 24u;
+let N_SEQ = 16u;
 let workgroup_size: u32 = 256u;
 let max_f32: f32 = 1000000.0;
 let max_int : u32 = 4294967295u;
@@ -107,9 +107,9 @@ fn main(
     }
 
     scratch[local_id.x] = local;
-    workgroupBarrier();
     
     for (var i: u32 = 0u; i < 8u; i = i + 1u) {
+        workgroupBarrier();
         if (local_id.x >= (1u << i)) {
             let value = scratch[local_id.x - (1u << i)];
             let smaller = local.distance <= value.distance;
@@ -118,7 +118,6 @@ fn main(
         }
         workgroupBarrier();
         scratch[local_id.x] = local;
-        workgroupBarrier();
     }
     
     var flag = FLAG_AGGREGATE_READY;
@@ -132,11 +131,9 @@ fn main(
         }
     }
     storageBarrier();
-
     if (local_id.x == workgroup_size - 1u) {
         atomicStore(&flag_buffer.data[workgroup_x], flag);
     }
-    storageBarrier();
 
     if(workgroup_x != 0u) {
         // decoupled loop-back
@@ -169,11 +166,13 @@ fn main(
             // else spin
         }
 
-        storageBarrier();
         if (local_id.x == workgroup_size - 1u) {
             shared_prefix = local;
             
             atomicStoreCandidate(workgroup_x * 2u + 0u, local);
+        }        
+        storageBarrier();
+        if (local_id.x == workgroup_size - 1u) {
             atomicStore(&flag_buffer.data[workgroup_x], FLAG_PREFIX_READY);
         }
     }

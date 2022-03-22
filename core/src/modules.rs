@@ -473,7 +473,7 @@ impl<'a> ChooseCentroidModule<'a> {
         find_centroid_module: &'a FindCentroidModule,
     ) -> Self {
         const WORKGROUP_SIZE: u32 = 256;
-        const N_SEQ: u32 = 24;
+        const N_SEQ: u32 = 20;
         let choose_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
             label: Some("Choose centroid shader"),
             source: ShaderSource::Wgsl(include_str!("shaders/choose_centroid.wgsl").into()),
@@ -883,7 +883,7 @@ impl<'a> PlusPlusInitModule<'a> {
 
     pub(crate) async fn compute(&self, device: &Device, queue: &Queue) {
         const WORKGROUP_SIZE: u32 = 256;
-        const N_SEQ: u32 = 24;
+        const N_SEQ: u32 = 16;
         const MAX_OPERATIONS_CHAIN: usize = 32;
 
         let choose_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
