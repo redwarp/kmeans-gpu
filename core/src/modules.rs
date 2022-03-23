@@ -6,8 +6,9 @@ use wgpu::{
     BindGroupLayoutEntry, BindingResource, BindingType, Buffer, BufferAddress, BufferBinding,
     BufferBindingType, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, ComputePass,
     ComputePassDescriptor, ComputePipeline, ComputePipelineDescriptor, Device, MapMode,
-    PipelineLayoutDescriptor, Queue, ShaderSource, ShaderStages, StorageTextureAccess,
-    TextureFormat, TextureSampleType, TextureViewDescriptor, TextureViewDimension,
+    PipelineLayoutDescriptor, Queue, ShaderSource, ShaderStages, StorageTextureAccess, Texture,
+    TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureViewDescriptor,
+    TextureViewDimension,
 };
 
 use crate::{
@@ -859,6 +860,55 @@ impl<'a> ChooseCentroidModule<'a> {
     }
 }
 
+struct DistanceMapTexture(Texture);
+
+impl DistanceMapTexture {
+    fn new(device: &Device, (width, height): (u32, u32)) -> Self {
+        let texture_size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Distance map texture"),
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::R32Float,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
+        });
+
+        Self(texture)
+    }
+
+    fn texture_2d_layout(binding: u32) -> BindGroupLayoutEntry {
+        BindGroupLayoutEntry {
+            binding,
+            visibility: ShaderStages::COMPUTE,
+            ty: BindingType::Texture {
+                sample_type: TextureSampleType::Float { filterable: false },
+                view_dimension: TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        }
+    }
+
+    fn texture_storage_layout(binding: u32) -> BindGroupLayoutEntry {
+        BindGroupLayoutEntry {
+            binding,
+            visibility: ShaderStages::COMPUTE,
+            ty: BindingType::StorageTexture {
+                access: StorageTextureAccess::WriteOnly,
+                format: TextureFormat::R32Float,
+                view_dimension: TextureViewDimension::D2,
+            },
+            count: None,
+        }
+    }
+}
+
 pub(crate) struct PlusPlusInitModule<'a> {
     k: u32,
     image_dimensions: (u32, u32),
@@ -886,6 +936,7 @@ impl<'a> PlusPlusInitModule<'a> {
         const N_SEQ: u32 = 16;
         const MAX_OPERATIONS_CHAIN: usize = 32;
 
+        let distance_map_texture = DistanceMapTexture::new(device, self.image_dimensions);
         let choose_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
             label: Some("Plus plus init shader"),
             source: ShaderSource::Wgsl(include_str!("shaders/plus_plus_init.wgsl").into()),
@@ -945,6 +996,7 @@ impl<'a> PlusPlusInitModule<'a> {
                         },
                         count: None,
                     },
+                    DistanceMapTexture::texture_2d_layout(5),
                 ],
             });
 
@@ -959,12 +1011,10 @@ impl<'a> PlusPlusInitModule<'a> {
             usage: BufferUsages::STORAGE,
             mapped_at_creation: false,
         });
-        let flag_buffer_size = (dispatch_size) * 4;
-        let flag_buffer = device.create_buffer(&BufferDescriptor {
+        let flag_buffer = device.create_buffer_init(&BufferInitDescriptor {
             label: None,
-            size: flag_buffer_size as BufferAddress,
+            contents: bytemuck::cast_slice::<u32, u8>(&vec![0; dispatch_size as usize]),
             usage: BufferUsages::STORAGE,
-            mapped_at_creation: false,
         });
         let part_id_buffer = device.create_buffer(&BufferDescriptor {
             label: None,
@@ -1000,6 +1050,14 @@ impl<'a> PlusPlusInitModule<'a> {
                 BindGroupEntry {
                     binding: 4,
                     resource: part_id_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 5,
+                    resource: BindingResource::TextureView(
+                        &distance_map_texture
+                            .0
+                            .create_view(&TextureViewDescriptor::default()),
+                    ),
                 },
             ],
         });
@@ -1081,6 +1139,63 @@ impl<'a> PlusPlusInitModule<'a> {
             mapped_at_creation: false,
         });
 
+        let calc_diff_bind_group_layout =
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: None,
+                entries: &[
+                    CentroidsBuffer::layout(0, true),
+                    WorkTexture::texture_2d_layout(1),
+                    DistanceMapTexture::texture_storage_layout(2),
+                ],
+            });
+
+        let calc_diff_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[&calc_diff_bind_group_layout, &k_index_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let calc_diff_shader_module = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+            label: Some("Calc diff shader"),
+            source: ShaderSource::Wgsl(include_str!("shaders/kmeans++_calc_diff.wgsl").into()),
+        });
+
+        let calc_diff_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: None,
+            layout: &calc_diff_bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: self.centroid_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(
+                        &self
+                            .work_texture
+                            .create_view(&TextureViewDescriptor::default()),
+                    ),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(
+                        &distance_map_texture
+                            .0
+                            .create_view(&TextureViewDescriptor::default()),
+                    ),
+                },
+            ],
+        });
+
+        let calc_diff_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: None,
+            layout: Some(&calc_diff_pipeline_layout),
+            module: &calc_diff_shader_module,
+            entry_point: "main",
+        });
+
+        let calc_diff_dispatch_size = compute_work_group_count(self.image_dimensions, (16, 16));
+
         for k_start in (0..self.k as usize).step_by(MAX_OPERATIONS_CHAIN) {
             let max_k = (k_start + MAX_OPERATIONS_CHAIN).min(self.k as usize);
 
@@ -1090,14 +1205,24 @@ impl<'a> PlusPlusInitModule<'a> {
                 let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
                     label: Some("Plus plus init pass"),
                 });
-                compute_pass.set_bind_group(0, &bind_group, &[]);
                 for k in k_start..max_k {
                     compute_pass.set_bind_group(1, &bind_groups[k as usize], &[]);
                     if k == 0 {
                         compute_pass.set_pipeline(&initial_pipeline);
+                        compute_pass.set_bind_group(0, &bind_group, &[]);
                         compute_pass.dispatch(1, 1, 1);
                     } else {
+                        // Calculate difference
+                        compute_pass.set_pipeline(&calc_diff_pipeline);
+                        compute_pass.set_bind_group(0, &calc_diff_bind_group, &[]);
+                        compute_pass.dispatch(
+                            calc_diff_dispatch_size.0,
+                            calc_diff_dispatch_size.1,
+                            1,
+                        );
+
                         compute_pass.set_pipeline(&pipeline);
+                        compute_pass.set_bind_group(0, &bind_group, &[]);
                         compute_pass.dispatch(dispatch_size, 1, 1);
                         compute_pass.set_pipeline(&pick_pipeline);
                         compute_pass.dispatch(1, 1, 1);
