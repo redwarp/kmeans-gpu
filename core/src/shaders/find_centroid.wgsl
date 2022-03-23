@@ -12,7 +12,7 @@ struct Indices {
 [[group(0), binding(2)]] var color_indices: texture_storage_2d<r32uint, write>;
 
 let max_int : u32 = 4294967295u;
-let max_f32: f32 = 1000.0;
+let max_f32: f32 = 100000.0;
 
 [[stage(compute), workgroup_size(16, 16)]]
 fn main(
@@ -25,15 +25,15 @@ fn main(
         return;
     }
 
-    let pixel : vec4<f32> = textureLoad(pixels, coords.xy, 0);
+    let pixel : vec3<f32> = textureLoad(pixels, coords.xy, 0).rgb;
 
     var min_distance: f32 = max_f32;
-    var found_index: u32 = centroids.count;
+    var found_index: u32 = 0u;
 
     for(var index: u32 = 0u; index < centroids.count; index = index + 1u){
-        let centroid_components : vec4<f32> = centroids.data[index];
+        let centroid_components : vec3<f32> = centroids.data[index].rgb;
 
-        let distance: f32 = distance(pixel.rgb, centroid_components.rgb);
+        let distance: f32 = distance(pixel, centroid_components);
 
         if (distance < min_distance) {            
             min_distance = distance;
@@ -41,7 +41,5 @@ fn main(
         }
     }
 
-    let index: u32 = global_id.y * u32(dimensions.x) + global_id.x;
-    textureStore(color_indices, coords, vec4<u32>(found_index));
-    storageBarrier();
+    textureStore(color_indices, coords, vec4<u32>(found_index, 0u, 0u, 0u));
 }
