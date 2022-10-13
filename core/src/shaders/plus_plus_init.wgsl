@@ -4,14 +4,6 @@ struct Centroids {
     data: array<vec4<f32>>,
 };
 
-struct KIndex {
-    k: u32,
-};
-
-struct AtomicBuffer {
-    data: array<atomic<u32>>,
-};
-
 struct Candidate {
     index: u32,
     distance: f32,
@@ -27,11 +19,11 @@ let max_int : u32 = 4294967295u;
 
 @group(0) @binding(0) var<storage, read_write> centroids: Centroids;
 @group(0) @binding(1) var pixels: texture_2d<f32>;
-@group(0) @binding(2) var<storage, read_write> prefix_buffer: AtomicBuffer;
-@group(0) @binding(3) var<storage, read_write> flag_buffer: AtomicBuffer;
-@group(0) @binding(4) var<storage, read_write> part_id_buffer : AtomicBuffer;
+@group(0) @binding(2) var<storage, read_write> prefix_buffer: array<atomic<u32>>;
+@group(0) @binding(3) var<storage, read_write> flag_buffer: array<atomic<u32>>;
+@group(0) @binding(4) var<storage, read_write> part_id_buffer : array<atomic<u32>>;
 @group(0) @binding(5) var distance_map: texture_2d<f32>;
-@group(1) @binding(0) var<uniform> k_index: KIndex;
+@group(1) @binding(0) var<uniform> k_index: u32;
 
 var<workgroup> scratch: array<Candidate, workgroup_size>;
 var<workgroup> shared_flag: u32;
@@ -42,7 +34,7 @@ fn coords(global_x: u32, dimensions: vec2<i32>) -> vec2<i32> {
 }
 
 fn last_group_idx() -> u32 {
-    return arrayLength(&flag_buffer.data) - 1u;
+    return arrayLength(&flag_buffer) - 1u;
 }
 
 fn in_bounds(global_x: u32, dimensions: vec2<i32>) -> bool {
@@ -50,12 +42,12 @@ fn in_bounds(global_x: u32, dimensions: vec2<i32>) -> bool {
 }
 
 fn atomicStoreCandidate(index: u32, value: Candidate) {
-    atomicStore(&prefix_buffer.data[index + 0u], value.index);
+    atomicStore(&prefix_buffer[index + 0u], value.index);
 }
 
 fn atomicLoadCandidate(index: u32, dimensions: vec2<i32>) -> Candidate {
     var output: Candidate;
-    output.index = atomicLoad(&prefix_buffer.data[index + 0u]);
+    output.index = atomicLoad(&prefix_buffer[index + 0u]);
 
     let coords = coords(output.index, dimensions);
 
@@ -80,7 +72,7 @@ fn main(
     @builtin(local_invocation_id) local_id : vec3<u32>,
 ) {  
     if (local_id.x == 0u) {
-        part_id = atomicAdd(&part_id_buffer.data[0], 1u);
+        part_id = atomicAdd(&part_id_buffer[0], 1u);
     }
     workgroupBarrier();
     let workgroup_x = part_id;
@@ -125,7 +117,7 @@ fn main(
     }
     storageBarrier();
     if (local_id.x == workgroup_size - 1u) {
-        atomicStore(&flag_buffer.data[workgroup_x], flag);
+        atomicStore(&flag_buffer[workgroup_x], flag);
     }
 
     if(workgroup_x != 0u) {
@@ -133,7 +125,7 @@ fn main(
         var loop_back_ix = workgroup_x - 1u;
         loop {
             if(local_id.x == workgroup_size - 1u) {
-                shared_flag = atomicLoad(&flag_buffer.data[loop_back_ix]);
+                shared_flag = atomicLoad(&flag_buffer[loop_back_ix]);
             }
             workgroupBarrier();
             flag = shared_flag;
@@ -160,7 +152,7 @@ fn main(
         }        
         storageBarrier();
         if (local_id.x == workgroup_size - 1u) {
-            atomicStore(&flag_buffer.data[workgroup_x], FLAG_PREFIX_READY);
+            atomicStore(&flag_buffer[workgroup_x], FLAG_PREFIX_READY);
         }
     }
 }
@@ -186,12 +178,12 @@ fn pick() {
     let centroid_coords = coords(centroid.index, dimensions);
     let new_centroid = vec4<f32>(textureLoad(pixels, centroid_coords, 0).rgb, 1.0);
 
-    centroids.data[k_index.k] = new_centroid;
+    centroids.data[k_index] = new_centroid;
 
     // Reset part ids for next centroid.
-    atomicStore(&part_id_buffer.data[0], 0u);
+    atomicStore(&part_id_buffer[0], 0u);
     // Reset flags.
     for (var i = 0u; i < last_group_idx(); i = i + 1u) {
-        atomicStore(&flag_buffer.data[i], FLAG_NOT_READY);
+        atomicStore(&flag_buffer[i], FLAG_NOT_READY);
     }
 }
