@@ -13,8 +13,8 @@ exclude = ["gfx", ".vscode"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
-wgpu = "0.12"
-bytemuck = { version = "1.9", features = ["derive"] }
+wgpu = "0.14"
+bytemuck = { version = "1.12", features = ["derive"] }
 anyhow = "1.0"
 palette = "0.6"
 log = "0.4"

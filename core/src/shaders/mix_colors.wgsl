@@ -2,14 +2,14 @@
 // https://en.wikipedia.org/wiki/Ordered_dithering
 
 struct Centroids {
-    count: u32;
-    data: array<vec4<f32>>;
+    count: u32,
+    data: array<vec4<f32>>,
 };
 
-[[group(0), binding(0)]] var input_texture: texture_2d<f32>;
-[[group(0), binding(1)]] var output_texture : texture_storage_2d<rgba32float, write>;
-[[group(0), binding(2)]] var color_indices: texture_2d<u32>;
-[[group(0), binding(3)]] var<storage, read> centroids: Centroids;
+@group(0) @binding(0) var input_texture: texture_2d<f32>;
+@group(0) @binding(1) var output_texture : texture_storage_2d<rgba32float, write>;
+@group(0) @binding(2) var color_indices: texture_2d<u32>;
+@group(0) @binding(3) var<storage, read> centroids: Centroids;
 
 let index_matrix: array<i32, 16> = array<i32, 16>(0,  8,  2,  10,
                                                   12, 4,  14, 6,
@@ -79,9 +79,10 @@ fn meld(color: vec4<f32>, coords: vec2<i32>) -> vec4<f32> {
     return factor * closest_colors[0] + (1.0 - factor) * closest_colors[1];
 }
 
-[[stage(compute), workgroup_size(16, 16)]]
+@compute
+@workgroup_size(16, 16)
 fn main_dither(
-    [[builtin(global_invocation_id)]] global_id : vec3<u32>,
+    @builtin(global_invocation_id) global_id : vec3<u32>,
 ) {
     let dimensions = textureDimensions(output_texture);
     let coords = vec2<i32>(global_id.xy);
@@ -95,9 +96,10 @@ fn main_dither(
     textureStore(output_texture, coords, dither2(color, coords));
 }
 
-[[stage(compute), workgroup_size(16, 16)]]
+@compute
+@workgroup_size(16, 16)
 fn main_meld(
-    [[builtin(global_invocation_id)]] global_id : vec3<u32>,
+    @builtin(global_invocation_id) global_id : vec3<u32>,
 ) {
     let dimensions = textureDimensions(output_texture);
     let coords = vec2<i32>(global_id.xy);

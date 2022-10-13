@@ -1,20 +1,20 @@
 struct Centroids {
-    count: u32;
+    count: u32,
     // Aligned 16. See https://www.w3.org/TR/WGSL/#address-space-layout-constraints
-    data: array<vec4<f32>>;
+    data: array<vec4<f32>>,
 };
 
 struct KIndex {
-    k: u32;
+    k: u32,
 };
 
 struct AtomicBuffer {
-    data: array<atomic<u32>>;
+    data: array<atomic<u32>>,
 };
 
 struct Candidate {
-    index: u32;
-    distance: f32;
+    index: u32,
+    distance: f32,
 };
 
 let FLAG_NOT_READY = 0u;
@@ -25,13 +25,13 @@ let workgroup_size: u32 = 256u;
 let max_f32: f32 = 4294967295.0;
 let max_int : u32 = 4294967295u;
 
-[[group(0), binding(0)]] var<storage, read_write> centroids: Centroids;
-[[group(0), binding(1)]] var pixels: texture_2d<f32>;
-[[group(0), binding(2)]] var<storage, read_write> prefix_buffer: AtomicBuffer;
-[[group(0), binding(3)]] var<storage, read_write> flag_buffer: AtomicBuffer;
-[[group(0), binding(4)]] var<storage, read_write> part_id_buffer : AtomicBuffer;
-[[group(0), binding(5)]] var distance_map: texture_2d<f32>;
-[[group(1), binding(0)]] var<uniform> k_index: KIndex;
+@group(0) @binding(0) var<storage, read_write> centroids: Centroids;
+@group(0) @binding(1) var pixels: texture_2d<f32>;
+@group(0) @binding(2) var<storage, read_write> prefix_buffer: AtomicBuffer;
+@group(0) @binding(3) var<storage, read_write> flag_buffer: AtomicBuffer;
+@group(0) @binding(4) var<storage, read_write> part_id_buffer : AtomicBuffer;
+@group(0) @binding(5) var distance_map: texture_2d<f32>;
+@group(1) @binding(0) var<uniform> k_index: KIndex;
 
 var<workgroup> scratch: array<Candidate, workgroup_size>;
 var<workgroup> shared_flag: u32;
@@ -75,9 +75,9 @@ fn selectCandidate(a: Candidate, b: Candidate) -> Candidate {
     }
 }
 
-[[stage(compute), workgroup_size(256)]]
+@compute @workgroup_size(256)
 fn main(
-    [[builtin(local_invocation_id)]] local_id : vec3<u32>,
+    @builtin(local_invocation_id) local_id : vec3<u32>,
 ) {  
     if (local_id.x == 0u) {
         part_id = atomicAdd(&part_id_buffer.data[0], 1u);
@@ -165,7 +165,8 @@ fn main(
     }
 }
 
-[[stage(compute), workgroup_size(1)]]
+@compute
+@workgroup_size(1)
 fn initial() {
     let dimensions = textureDimensions(pixels);
     let x = i32(f32(dimensions.x) * rand(42.0));
@@ -176,7 +177,8 @@ fn initial() {
     centroids.data[0] = new_centroid;
 }
 
-[[stage(compute), workgroup_size(1)]]
+@compute
+@workgroup_size(1)
 fn pick() {
     let dimensions = textureDimensions(pixels);
     let centroid = atomicLoadCandidate(last_group_idx() * 2u + 0u, dimensions);

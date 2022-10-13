@@ -1,36 +1,36 @@
 struct Centroids {
-    count: u32;
+    count: u32,
     // Aligned 16. See https://www.w3.org/TR/WGSL/#address-space-layout-constraints
-    data: array<vec4<f32>>;
+    data: array<vec4<f32>>,
 };
 
 struct AtomicBuffer {
-    data: array<atomic<u32>>;
+    data: array<atomic<u32>>,
 };
 
 struct KIndex {
-    k: u32;
+    k: u32,
 };
 
 struct Settings {
-    n_seq: u32;
-    convergence: f32;
+    n_seq: u32,
+    convergence: f32,
 };
 
 struct ColorAggregator {
-    color: vec3<f32>;
-    count: u32;
+    color: vec3<f32>,
+    count: u32,
 };
 
-[[group(0), binding(0)]] var<storage, read_write> centroids: Centroids;
-[[group(0), binding(1)]] var color_indices: texture_2d<u32>;
-[[group(0), binding(2)]] var pixels: texture_2d<f32>;
-[[group(0), binding(3)]] var<storage, read_write> part_id_buffer : AtomicBuffer;
-[[group(1), binding(0)]] var<storage, read_write> prefix_buffer: AtomicBuffer;
-[[group(1), binding(1)]] var<storage, read_write> flag_buffer: AtomicBuffer;
-[[group(1), binding(2)]] var<storage, read_write> convergence: AtomicBuffer;
-[[group(1), binding(3)]] var<uniform> settings: Settings;
-[[group(2), binding(0)]] var<uniform> k_index: KIndex;
+@group(0) @binding(0) var<storage, read_write> centroids: Centroids;
+@group(0) @binding(1) var color_indices: texture_2d<u32>;
+@group(0) @binding(2) var pixels: texture_2d<f32>;
+@group(0) @binding(3) var<storage, read_write> part_id_buffer : AtomicBuffer;
+@group(1) @binding(0) var<storage, read_write> prefix_buffer: AtomicBuffer;
+@group(1) @binding(1) var<storage, read_write> flag_buffer: AtomicBuffer;
+@group(1) @binding(2) var<storage, read_write> convergence: AtomicBuffer;
+@group(1) @binding(3) var<uniform> settings: Settings;
+@group(2) @binding(0) var<uniform> k_index: KIndex;
 
 let workgroup_size: u32 = 256u;
 
@@ -76,9 +76,10 @@ fn atomicLoadPrefixVec(index: u32) -> ColorAggregator {
     return value;
 }
 
-[[stage(compute), workgroup_size(256)]]
+@compute
+@workgroup_size(256)
 fn main(
-    [[builtin(local_invocation_id)]] local_id : vec3<u32>,
+    @builtin(local_invocation_id) local_id : vec3<u32>,
 ) {
     if (local_id.x == 0u) {
         part_id = atomicAdd(&part_id_buffer.data[0], 1u);
@@ -183,7 +184,8 @@ fn main(
     }
 }
 
-[[stage(compute), workgroup_size(1)]]
+@compute
+@workgroup_size(1)
 fn pick() {
     let dimensions = textureDimensions(pixels);
     let sum = atomicLoadPrefixVec(last_group_idx() * 8u + 0u);

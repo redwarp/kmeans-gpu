@@ -4,7 +4,7 @@ use modules::{
     MixColorsModule, Module, PlusPlusInitModule, SwapModule,
 };
 use palette::{IntoColor, Lab, Pixel, Srgb, Srgba};
-use std::{fmt::Display, ops::Deref, str::FromStr, vec};
+use std::{fmt::Display, ops::Deref, str::FromStr, sync::mpsc::channel, vec};
 use utils::padded_bytes_per_row;
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
@@ -602,25 +602,32 @@ pub async fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<I
     queue.submit(Some(encoder.finish()));
 
     let buffer_slice = output_buffer.slice(..);
-    let buffer_future = buffer_slice.map_async(MapMode::Read);
+    let (buffer_sender, buffer_receiver) = channel();
+    buffer_slice.map_async(MapMode::Read, move |v| {
+        buffer_sender.send(v).expect("Couldn't send result");
+    });
 
     let query_slice = query_buf.slice(..);
-    let query_future = query_slice.map_async(MapMode::Read);
+    let (query_sender, query_receiver) = channel();
+    query_slice.map_async(MapMode::Read, move |v| {
+        query_sender.send(v).expect("Couldn't send result");
+    });
 
     device.poll(wgpu::Maintain::Wait);
-
-    if query_future.await.is_ok() && features.contains(Features::TIMESTAMP_QUERY) {
-        let ts_period = queue.get_timestamp_period();
-        let ts_data_raw = &*query_slice.get_mapped_range();
-        let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
-        println!(
-            "Compute shader elapsed: {:?}ms",
-            (ts_data[1] - ts_data[0]) as f64 * ts_period as f64 * 1e-6
-        );
+    if features.contains(Features::TIMESTAMP_QUERY) {
+        if let Ok(Ok(())) = query_receiver.recv() {
+            let ts_period = queue.get_timestamp_period();
+            let ts_data_raw = &*query_slice.get_mapped_range();
+            let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
+            println!(
+                "Compute shader elapsed: {:?}ms",
+                (ts_data[1] - ts_data[0]) as f64 * ts_period as f64 * 1e-6
+            );
+        }
     }
 
-    match buffer_future.await {
-        Ok(()) => {
+    match buffer_receiver.recv() {
+        Ok(Ok(())) => {
             let padded_data = buffer_slice.get_mapped_range();
             let mut pixels: Vec<u8> =
                 vec![0; output_buffer.unpadded_bytes_per_row * height as usize];
@@ -635,6 +642,7 @@ pub async fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<I
 
             Ok(result)
         }
+        Ok(Err(e)) => Err(e.into()),
         Err(e) => Err(e.into()),
     }
 }
@@ -749,25 +757,32 @@ pub async fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<
     queue.submit(Some(encoder.finish()));
 
     let cent_buffer_slice = staging_buffer.slice(..);
-    let cent_buffer_future = cent_buffer_slice.map_async(MapMode::Read);
+    let (cent_sender, cent_receiver) = channel();
+    cent_buffer_slice.map_async(MapMode::Read, move |v| {
+        cent_sender.send(v).expect("Couldn't send result");
+    });
 
     let query_slice = query_buf.slice(..);
-    let query_future = query_slice.map_async(MapMode::Read);
+    let (query_sender, query_receiver) = channel();
+    query_slice.map_async(MapMode::Read, move |v| {
+        query_sender.send(v).expect("Couldn't send result");
+    });
 
     device.poll(wgpu::Maintain::Wait);
-
-    if query_future.await.is_ok() && features.contains(Features::TIMESTAMP_QUERY) {
-        let ts_period = queue.get_timestamp_period();
-        let ts_data_raw = &*query_slice.get_mapped_range();
-        let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
-        println!(
-            "Compute shader elapsed: {:?}ms",
-            (ts_data[1] - ts_data[0]) as f64 * ts_period as f64 * 1e-6
-        );
+    if features.contains(Features::TIMESTAMP_QUERY) {
+        if let Ok(Ok(())) = query_receiver.recv() {
+            let ts_period = queue.get_timestamp_period();
+            let ts_data_raw = &*query_slice.get_mapped_range();
+            let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
+            println!(
+                "Compute shader elapsed: {:?}ms",
+                (ts_data[1] - ts_data[0]) as f64 * ts_period as f64 * 1e-6
+            );
+        }
     }
 
-    match cent_buffer_future.await {
-        Ok(()) => {
+    match cent_receiver.recv() {
+        Ok(Ok(())) => {
             let data = cent_buffer_slice.get_mapped_range();
 
             let mut colors: Vec<_> = bytemuck::cast_slice::<u8, f32>(&data[16..])
@@ -793,6 +808,7 @@ pub async fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<
             });
             Ok(colors)
         }
+        Ok(Err(e)) => Err(e.into()),
         Err(e) => Err(e.into()),
     }
 }
@@ -900,25 +916,32 @@ pub async fn find(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -
     queue.submit(Some(encoder.finish()));
 
     let buffer_slice = output_buffer.slice(..);
-    let buffer_future = buffer_slice.map_async(MapMode::Read);
+    let (buffer_sender, buffer_receiver) = channel();
+    buffer_slice.map_async(MapMode::Read, move |v| {
+        buffer_sender.send(v).expect("Couldn't send result");
+    });
 
     let query_slice = query_buf.slice(..);
-    let query_future = query_slice.map_async(MapMode::Read);
+    let (query_sender, query_receiver) = channel();
+    query_slice.map_async(MapMode::Read, move |v| {
+        query_sender.send(v).expect("Couldn't send result");
+    });
 
     device.poll(wgpu::Maintain::Wait);
-
-    if query_future.await.is_ok() && features.contains(Features::TIMESTAMP_QUERY) {
-        let ts_period = queue.get_timestamp_period();
-        let ts_data_raw = &*query_slice.get_mapped_range();
-        let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
-        println!(
-            "Compute shader elapsed: {:?}ms",
-            (ts_data[1] - ts_data[0]) as f64 * ts_period as f64 * 1e-6
-        );
+    if features.contains(Features::TIMESTAMP_QUERY) {
+        if let Ok(Ok(())) = query_receiver.recv() {
+            let ts_period = queue.get_timestamp_period();
+            let ts_data_raw = &*query_slice.get_mapped_range();
+            let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
+            println!(
+                "Compute shader elapsed: {:?}ms",
+                (ts_data[1] - ts_data[0]) as f64 * ts_period as f64 * 1e-6
+            );
+        }
     }
 
-    match buffer_future.await {
-        Ok(()) => {
+    match buffer_receiver.recv() {
+        Ok(Ok(())) => {
             let padded_data = buffer_slice.get_mapped_range();
             let mut pixels: Vec<u8> =
                 vec![0; output_buffer.unpadded_bytes_per_row * height as usize];
@@ -933,6 +956,7 @@ pub async fn find(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -
 
             Ok(result)
         }
+        Ok(Err(e)) => Err(e.into()),
         Err(e) => Err(e.into()),
     }
 }
@@ -1080,25 +1104,32 @@ pub async fn mix(
     queue.submit(Some(encoder.finish()));
 
     let buffer_slice = output_buffer.slice(..);
-    let buffer_future = buffer_slice.map_async(MapMode::Read);
+    let (buffer_sender, buffer_receiver) = channel();
+    buffer_slice.map_async(MapMode::Read, move |v| {
+        buffer_sender.send(v).expect("Couldn't send result");
+    });
 
     let query_slice = query_buf.slice(..);
-    let query_future = query_slice.map_async(MapMode::Read);
+    let (query_sender, query_receiver) = channel();
+    query_slice.map_async(MapMode::Read, move |v| {
+        query_sender.send(v).expect("Couldn't send result");
+    });
 
     device.poll(wgpu::Maintain::Wait);
-
-    if query_future.await.is_ok() && features.contains(Features::TIMESTAMP_QUERY) {
-        let ts_period = queue.get_timestamp_period();
-        let ts_data_raw = &*query_slice.get_mapped_range();
-        let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
-        println!(
-            "Compute shader elapsed: {:?}ms",
-            (ts_data[1] - ts_data[0]) as f64 * ts_period as f64 * 1e-6
-        );
+    if features.contains(Features::TIMESTAMP_QUERY) {
+        if let Ok(Ok(())) = query_receiver.recv() {
+            let ts_period = queue.get_timestamp_period();
+            let ts_data_raw = &*query_slice.get_mapped_range();
+            let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
+            println!(
+                "Compute shader elapsed: {:?}ms",
+                (ts_data[1] - ts_data[0]) as f64 * ts_period as f64 * 1e-6
+            );
+        }
     }
 
-    match buffer_future.await {
-        Ok(()) => {
+    match buffer_receiver.recv() {
+        Ok(Ok(())) => {
             let padded_data = buffer_slice.get_mapped_range();
             let mut pixels: Vec<u8> =
                 vec![0; output_buffer.unpadded_bytes_per_row * height as usize];
@@ -1113,6 +1144,7 @@ pub async fn mix(
 
             Ok(result)
         }
+        Ok(Err(e)) => Err(e.into()),
         Err(e) => Err(e.into()),
     }
 }

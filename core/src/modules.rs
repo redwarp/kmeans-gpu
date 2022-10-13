@@ -1,5 +1,5 @@
 use log::{debug, log_enabled};
-use std::num::NonZeroU32;
+use std::{num::NonZeroU32, sync::mpsc::channel};
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
@@ -34,7 +34,7 @@ impl ColorConverterModule {
         input_texture: &InputTexture,
         work_texture: &WorkTexture,
     ) -> Self {
-        let convert_color_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+        let convert_color_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Convert color shader"),
             source: ShaderSource::Wgsl(
                 match color_space {
@@ -118,7 +118,7 @@ impl Module for ColorConverterModule {
     fn dispatch<'a>(&'a self, compute_pass: &mut ComputePass<'a>) {
         compute_pass.set_pipeline(&self.pipeline);
         compute_pass.set_bind_group(0, &self.bind_group, &[]);
-        compute_pass.dispatch(self.dispatch_size.0, self.dispatch_size.1, 1);
+        compute_pass.dispatch_workgroups(self.dispatch_size.0, self.dispatch_size.1, 1);
     }
 }
 
@@ -136,7 +136,7 @@ impl ColorReverterModule {
         work_texture: &WorkTexture,
         output_texture: &OutputTexture,
     ) -> Self {
-        let revert_color_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+        let revert_color_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Revert color shader"),
             source: ShaderSource::Wgsl(
                 match color_space {
@@ -229,7 +229,7 @@ impl Module for ColorReverterModule {
     fn dispatch<'a>(&'a self, compute_pass: &mut ComputePass<'a>) {
         compute_pass.set_pipeline(&self.pipeline);
         compute_pass.set_bind_group(0, &self.bind_group, &[]);
-        compute_pass.dispatch(self.dispatch_size.0, self.dispatch_size.1, 1);
+        compute_pass.dispatch_workgroups(self.dispatch_size.0, self.dispatch_size.1, 1);
     }
 }
 
@@ -247,7 +247,7 @@ impl SwapModule {
         centroid_buffer: &CentroidsBuffer,
         color_index_texture: &ColorIndexTexture,
     ) -> Self {
-        let swap_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+        let swap_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Swap colors shader"),
             source: ShaderSource::Wgsl(include_str!("shaders/swap.wgsl").into()),
         });
@@ -328,7 +328,7 @@ impl Module for SwapModule {
     fn dispatch<'a>(&'a self, compute_pass: &mut ComputePass<'a>) {
         compute_pass.set_pipeline(&self.pipeline);
         compute_pass.set_bind_group(0, &self.bind_group, &[]);
-        compute_pass.dispatch(self.dispatch_size.0, self.dispatch_size.1, 1);
+        compute_pass.dispatch_workgroups(self.dispatch_size.0, self.dispatch_size.1, 1);
     }
 }
 
@@ -346,7 +346,7 @@ impl FindCentroidModule {
         centroid_buffer: &CentroidsBuffer,
         color_index_texture: &ColorIndexTexture,
     ) -> Self {
-        let find_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+        let find_centroid_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Find centroid shader"),
             source: ShaderSource::Wgsl(include_str!("shaders/find_centroid.wgsl").into()),
         });
@@ -439,7 +439,7 @@ impl Module for FindCentroidModule {
     fn dispatch<'a>(&'a self, compute_pass: &mut ComputePass<'a>) {
         compute_pass.set_pipeline(&self.pipeline);
         compute_pass.set_bind_group(0, &self.bind_group, &[]);
-        compute_pass.dispatch(self.dispatch_size.0, self.dispatch_size.1, 1);
+        compute_pass.dispatch_workgroups(self.dispatch_size.0, self.dispatch_size.1, 1);
     }
 }
 
@@ -475,7 +475,7 @@ impl<'a> ChooseCentroidModule<'a> {
     ) -> Self {
         const WORKGROUP_SIZE: u32 = 256;
         const N_SEQ: u32 = 20;
-        let choose_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+        let choose_centroid_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Choose centroid shader"),
             source: ShaderSource::Wgsl(include_str!("shaders/choose_centroid.wgsl").into()),
         });
@@ -777,9 +777,9 @@ impl<'a> ChooseCentroidModule<'a> {
                 for k in k_start..max_k {
                     compute_pass.set_bind_group(2, &self.bind_groups[k as usize], &[]);
                     compute_pass.set_pipeline(&self.pipeline);
-                    compute_pass.dispatch(self.dispatch_size, 1, 1);
+                    compute_pass.dispatch_workgroups(self.dispatch_size, 1, 1);
                     compute_pass.set_pipeline(&self.pick_pipeline);
-                    compute_pass.dispatch(1, 1, 1);
+                    compute_pass.dispatch_workgroups(1, 1, 1);
                 }
             }
 
@@ -806,12 +806,16 @@ impl<'a> ChooseCentroidModule<'a> {
 
                 queue.submit(Some(encoder.finish()));
                 let check_convergence_slice = self.convergence_buffer.mapped_buffer.slice(..);
-                let check_convergence_future = check_convergence_slice.map_async(MapMode::Read);
+
+                let (sender, receiver) = channel();
+                check_convergence_slice.map_async(MapMode::Read, move |v| {
+                    sender.send(v).expect("Couldn't send result");
+                });
 
                 device.poll(wgpu::Maintain::Wait);
 
-                match check_convergence_future.await {
-                    Ok(_) => {
+                match receiver.recv() {
+                    Ok(Ok(_)) => {
                         let convergence_data = bytemuck::cast_slice::<u8, u32>(
                             &check_convergence_slice.get_mapped_range(),
                         )
@@ -822,8 +826,8 @@ impl<'a> ChooseCentroidModule<'a> {
                             break 'iteration;
                         }
                     }
-                    Err(_) => break 'iteration,
-                };
+                    _ => break 'iteration,
+                }
 
                 self.convergence_buffer.mapped_buffer.unmap();
             } else {
@@ -840,11 +844,14 @@ impl<'a> ChooseCentroidModule<'a> {
 
             queue.submit(Some(encoder.finish()));
             let cent_buffer_slice = staging_buffer.slice(..);
-            let cent_buffer_future = cent_buffer_slice.map_async(MapMode::Read);
+            let (sender, receiver) = channel();
+            cent_buffer_slice.map_async(MapMode::Read, move |v| {
+                sender.send(v).expect("Couldn't send result");
+            });
 
             device.poll(wgpu::Maintain::Wait);
 
-            if let Ok(()) = cent_buffer_future.await {
+            if let Ok(Ok(())) = receiver.recv() {
                 let data = cent_buffer_slice.get_mapped_range();
 
                 for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[16..])
@@ -937,7 +944,7 @@ impl<'a> PlusPlusInitModule<'a> {
         const MAX_OPERATIONS_CHAIN: usize = 32;
 
         let distance_map_texture = DistanceMapTexture::new(device, self.image_dimensions);
-        let choose_centroid_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+        let choose_centroid_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Plus plus init shader"),
             source: ShaderSource::Wgsl(include_str!("shaders/plus_plus_init.wgsl").into()),
         });
@@ -1155,7 +1162,7 @@ impl<'a> PlusPlusInitModule<'a> {
             push_constant_ranges: &[],
         });
 
-        let calc_diff_shader_module = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+        let calc_diff_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Calc diff shader"),
             source: ShaderSource::Wgsl(include_str!("shaders/kmeans++_calc_diff.wgsl").into()),
         });
@@ -1210,12 +1217,12 @@ impl<'a> PlusPlusInitModule<'a> {
                     if k == 0 {
                         compute_pass.set_pipeline(&initial_pipeline);
                         compute_pass.set_bind_group(0, &bind_group, &[]);
-                        compute_pass.dispatch(1, 1, 1);
+                        compute_pass.dispatch_workgroups(1, 1, 1);
                     } else {
                         // Calculate difference
                         compute_pass.set_pipeline(&calc_diff_pipeline);
                         compute_pass.set_bind_group(0, &calc_diff_bind_group, &[]);
-                        compute_pass.dispatch(
+                        compute_pass.dispatch_workgroups(
                             calc_diff_dispatch_size.0,
                             calc_diff_dispatch_size.1,
                             1,
@@ -1223,9 +1230,9 @@ impl<'a> PlusPlusInitModule<'a> {
 
                         compute_pass.set_pipeline(&pipeline);
                         compute_pass.set_bind_group(0, &bind_group, &[]);
-                        compute_pass.dispatch(dispatch_size, 1, 1);
+                        compute_pass.dispatch_workgroups(dispatch_size, 1, 1);
                         compute_pass.set_pipeline(&pick_pipeline);
-                        compute_pass.dispatch(1, 1, 1);
+                        compute_pass.dispatch_workgroups(1, 1, 1);
                     }
                 }
             }
@@ -1248,11 +1255,15 @@ impl<'a> PlusPlusInitModule<'a> {
 
             queue.submit(Some(encoder.finish()));
             let cent_buffer_slice = staging_buffer.slice(..);
-            let cent_buffer_future = cent_buffer_slice.map_async(MapMode::Read);
+
+            let (sender, receiver) = channel();
+            cent_buffer_slice.map_async(MapMode::Read, move |v| {
+                sender.send(v).expect("Couldn't send result");
+            });
 
             device.poll(wgpu::Maintain::Wait);
 
-            if let Ok(()) = cent_buffer_future.await {
+            if let Ok(Ok(())) = receiver.recv() {
                 let data = cent_buffer_slice.get_mapped_range();
 
                 for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[16..])
@@ -1285,7 +1296,7 @@ impl MixColorsModule {
         centroids_buffer: &CentroidsBuffer,
         mix_mode: &MixMode,
     ) -> Self {
-        let shader_module = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+        let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Mix colors shader"),
             source: ShaderSource::Wgsl(include_str!("shaders/mix_colors.wgsl").into()),
         });
@@ -1359,6 +1370,6 @@ impl Module for MixColorsModule {
     fn dispatch<'a>(&'a self, compute_pass: &mut ComputePass<'a>) {
         compute_pass.set_pipeline(&self.pipeline);
         compute_pass.set_bind_group(0, &self.bind_group, &[]);
-        compute_pass.dispatch(self.dispatch_size.0, self.dispatch_size.1, 1);
+        compute_pass.dispatch_workgroups(self.dispatch_size.0, self.dispatch_size.1, 1);
     }
 }
