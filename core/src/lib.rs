@@ -379,7 +379,7 @@ struct CentroidsBuffer {
 
 impl CentroidsBuffer {
     fn empty_centroids(k: u32, device: &Device) -> Self {
-        let mut centroids: Vec<u8> = vec![];
+        let mut centroids: Vec<u8> = Vec::with_capacity((k as usize + 1) * 4);
         // Aligned 16, see https://www.w3.org/TR/WGSL/#address-space-layout-constraints
         centroids.extend_from_slice(bytemuck::cast_slice(&[k, 0, 0, 0]));
 

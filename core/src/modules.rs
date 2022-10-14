@@ -1011,7 +1011,7 @@ impl<'a> PlusPlusInitModule<'a> {
             (self.image_dimensions.0 * self.image_dimensions.1, 1),
             (WORKGROUP_SIZE * N_SEQ, 1),
         );
-        let prefix_buffer_size = dispatch_size * 4 * 4;
+        let prefix_buffer_size = dispatch_size * 4 * 2;
         let prefix_buffer = device.create_buffer(&BufferDescriptor {
             label: None,
             size: prefix_buffer_size as BufferAddress,
@@ -1227,7 +1227,6 @@ impl<'a> PlusPlusInitModule<'a> {
                             calc_diff_dispatch_size.1,
                             1,
                         );
-
                         compute_pass.set_pipeline(&pipeline);
                         compute_pass.set_bind_group(0, &bind_group, &[]);
                         compute_pass.dispatch_workgroups(dispatch_size, 1, 1);

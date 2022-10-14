@@ -162,17 +162,17 @@ fn main(
         }
 
         // compute inclusive prefix
-        storageBarrier();
         if (local_id.x == workgroup_size - 1u) {
             var inclusive_prefix: ColorAggregator;
             inclusive_prefix.color = exclusive_prefix.color + local.color;
             inclusive_prefix.count = exclusive_prefix.count + local.count;
             
             atomicStorePrefixVec(workgroup_x * 8u + 0u, inclusive_prefix);
+        }
+        storageBarrier();
+        if (local_id.x == workgroup_size - 1u) {
             atomicStore(&flag_buffer[workgroup_x], FLAG_PREFIX_READY);
         }
-        workgroupBarrier();
-        storageBarrier();
     }
 }
 
