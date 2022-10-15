@@ -22,13 +22,13 @@ pub enum Commands {
     /// Create an image quantized with kmeans
     Kmeans {
         /// K value, aka the number of colors we want to extract
-        #[clap(short, validator = validate_k)]
+        #[clap(short, value_parser = validate_k)]
         k: u32,
         /// Input file
-        #[clap(short, long, validator = validate_filenames, parse(from_os_str))]
+        #[clap(short, long, value_parser = validate_filenames)]
         input: PathBuf,
         /// Optional output file
-        #[clap(short, long, parse(from_os_str))]
+        #[clap(short, long, value_parser)]
         output: Option<PathBuf>,
         /// Optional extension to use if an output file is not specified
         #[clap(short, long)]
@@ -40,13 +40,13 @@ pub enum Commands {
     /// Output the palette calculated with k-means
     Palette {
         /// K value, aka the number of colors we want to extract
-        #[clap(short, validator = validate_k)]
+        #[clap(short, value_parser = validate_k)]
         k: u32,
         /// Input file
-        #[clap(short, long, validator = validate_filenames, parse(from_os_str))]
+        #[clap(short, long, value_parser = validate_filenames)]
         input: PathBuf,
         /// Optional output file
-        #[clap(short, long, parse(from_os_str))]
+        #[clap(short, long, value_parser)]
         output: Option<PathBuf>,
         /// The colorspace to use when calculating colors. Lab gives more natural colors
         #[clap(short, long="colorspace", default_value_t=ColorSpace::Lab)]
@@ -55,13 +55,13 @@ pub enum Commands {
     /// Find colors in image that are closest to the replacements, and swap them
     Find {
         /// Input file
-        #[clap(short, long, validator = validate_filenames, parse(from_os_str))]
+        #[clap(short, long, value_parser = validate_filenames)]
         input: PathBuf,
         /// Optional output file
-        #[clap(short, long, parse(from_os_str))]
+        #[clap(short, long, value_parser)]
         output: Option<PathBuf>,
         /// List of RGB replacement colors, as #RRGGBB,#RRGGBB
-        #[clap(short, long, validator = validate_replacement)]
+        #[clap(short, long, value_parser = validate_replacement)]
         replacement: String,
         /// The colorspace to use when calculating colors. Lab gives more natural colors
         #[clap(short, long="colorspace", default_value_t=ColorSpace::Lab)]
@@ -70,13 +70,13 @@ pub enum Commands {
     /// Quantized the image with kmeans, then mix it's resulting color.
     Mix {
         /// K value, aka the number of colors we want to extract
-        #[clap(short, validator = validate_k_for_dithering)]
+        #[clap(short, value_parser = validate_k_for_dithering)]
         k: u32,
         /// Input file
-        #[clap(short, long, validator = validate_filenames, parse(from_os_str))]
+        #[clap(short, long, value_parser = validate_filenames)]
         input: PathBuf,
         /// Optional output file
-        #[clap(short, long, parse(from_os_str))]
+        #[clap(short, long, value_parser)]
         output: Option<PathBuf>,
         /// Optional extension to use if an output file is not specified
         #[clap(short, long)]
@@ -90,12 +90,12 @@ pub enum Commands {
     },
     Debug {
         /// K value, aka the number of colors we want to extract
-        #[clap(short, validator = validate_k)]
+        #[clap(short, value_parser = validate_k)]
         k: u32,
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Extension {
     Png,
     Jpg,
@@ -128,11 +128,11 @@ impl Display for Extension {
     }
 }
 
-fn validate_k(s: &str) -> Result<()> {
+fn validate_k(s: &str) -> Result<u32> {
     match s.parse::<u32>() {
         Ok(k) => {
             if k >= 1 {
-                Ok(())
+                Ok(k)
             } else {
                 Err(anyhow!("k must be an integer higher than 0."))
             }
@@ -141,11 +141,11 @@ fn validate_k(s: &str) -> Result<()> {
     }
 }
 
-fn validate_k_for_dithering(s: &str) -> Result<()> {
+fn validate_k_for_dithering(s: &str) -> Result<u32> {
     match s.parse::<u32>() {
         Ok(k) => {
             if k >= 2 {
-                Ok(())
+                Ok(k)
             } else {
                 Err(anyhow!("k must be an integer, minimum 2."))
             }
@@ -154,18 +154,18 @@ fn validate_k_for_dithering(s: &str) -> Result<()> {
     }
 }
 
-fn validate_filenames(s: &str) -> Result<()> {
+fn validate_filenames(s: &str) -> Result<PathBuf> {
     if s.len() > 4 && s.ends_with(".png") || s.ends_with(".jpg") {
-        Ok(())
+        Ok(PathBuf::from(s))
     } else {
         Err(anyhow!("Only support png or jpg files."))
     }
 }
 
-fn validate_replacement(s: &str) -> Result<()> {
+fn validate_replacement(s: &str) -> Result<String> {
     let re = Regex::new(r"^#[0-9a-fA-F]{6}(?:,#[0-9a-fA-F]{6})*$").unwrap();
     if re.is_match(s) {
-        Ok(())
+        Ok(s.to_owned())
     } else {
         Err(anyhow!(
             "Replacement colors should be chained like #ffaa12,#fe7845,#aabbff"

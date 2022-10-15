@@ -51,6 +51,7 @@ impl Image {
     }
 }
 
+#[derive(Clone, Copy)]
 pub enum ColorSpace {
     Lab,
     Rgb,
@@ -98,6 +99,7 @@ impl Display for ColorSpace {
     }
 }
 
+#[derive(Clone, Copy)]
 pub enum MixMode {
     Dither,
     Meld,
