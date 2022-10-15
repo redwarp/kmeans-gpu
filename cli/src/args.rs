@@ -88,6 +88,11 @@ pub enum Commands {
         #[clap(short, long="mixmode", default_value_t=MixMode::Dither)]
         mix_mode: MixMode,
     },
+    Debug {
+        /// K value, aka the number of colors we want to extract
+        #[clap(short, validator = validate_k)]
+        k: u32,
+    },
 }
 
 #[derive(Debug)]
