@@ -349,6 +349,47 @@ impl OutputTexture {
             padded_bytes_per_row,
         }
     }
+
+    fn pull_image(
+        &self,
+        (width, height): (u32, u32),
+        device: &Device,
+        queue: &Queue,
+    ) -> Result<Image> {
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
+
+        let output_buffer = self.output_buffer(device, &mut encoder);
+
+        queue.submit(Some(encoder.finish()));
+
+        let buffer_slice = output_buffer.slice(..);
+        let (buffer_sender, buffer_receiver) = channel();
+        buffer_slice.map_async(MapMode::Read, move |v| {
+            buffer_sender.send(v).expect("Couldn't send result");
+        });
+
+        device.poll(wgpu::Maintain::Wait);
+
+        match buffer_receiver.recv() {
+            Ok(Ok(())) => {
+                let padded_data = buffer_slice.get_mapped_range();
+                let mut pixels: Vec<u8> =
+                    vec![0; output_buffer.unpadded_bytes_per_row * height as usize];
+                for (padded, pixels) in padded_data
+                    .chunks_exact(output_buffer.padded_bytes_per_row)
+                    .zip(pixels.chunks_exact_mut(output_buffer.unpadded_bytes_per_row))
+                {
+                    pixels.copy_from_slice(&padded[..output_buffer.unpadded_bytes_per_row]);
+                }
+
+                let result = Image::from_raw_pixels((width, height), &pixels);
+
+                Ok(result)
+            }
+            Ok(Err(e)) => Err(e.into()),
+            Err(e) => Err(e.into()),
+        }
+    }
 }
 
 impl Deref for OutputTexture {
@@ -516,8 +557,6 @@ impl Deref for CentroidsBuffer {
 }
 
 pub async fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> {
-    let (width, height) = image.dimensions;
-
     let instance = Instance::new(Backends::all());
     let adapter = instance
         .request_adapter(&RequestAdapterOptionsBase {
@@ -638,22 +677,12 @@ pub async fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<I
         swap_module.dispatch(&mut compute_pass);
         color_reverter_module.dispatch(&mut compute_pass);
     }
+
     if let Some(query_set) = &query_set {
         encoder.write_timestamp(query_set, 1);
-    }
-
-    let output_buffer = output_texture.output_buffer(&device, &mut encoder);
-
-    if let Some(query_set) = &query_set {
         encoder.resolve_query_set(query_set, 0..2, &query_buf, 0);
     }
     queue.submit(Some(encoder.finish()));
-
-    let buffer_slice = output_buffer.slice(..);
-    let (buffer_sender, buffer_receiver) = channel();
-    buffer_slice.map_async(MapMode::Read, move |v| {
-        buffer_sender.send(v).expect("Couldn't send result");
-    });
 
     let query_slice = query_buf.slice(..);
     let (query_sender, query_receiver) = channel();
@@ -662,6 +691,7 @@ pub async fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<I
     });
 
     device.poll(wgpu::Maintain::Wait);
+
     if features.contains(Features::TIMESTAMP_QUERY) {
         if let Ok(Ok(())) = query_receiver.recv() {
             let ts_period = queue.get_timestamp_period();
@@ -674,25 +704,7 @@ pub async fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<I
         }
     }
 
-    match buffer_receiver.recv() {
-        Ok(Ok(())) => {
-            let padded_data = buffer_slice.get_mapped_range();
-            let mut pixels: Vec<u8> =
-                vec![0; output_buffer.unpadded_bytes_per_row * height as usize];
-            for (padded, pixels) in padded_data
-                .chunks_exact(output_buffer.padded_bytes_per_row)
-                .zip(pixels.chunks_exact_mut(output_buffer.unpadded_bytes_per_row))
-            {
-                pixels.copy_from_slice(&padded[..output_buffer.unpadded_bytes_per_row]);
-            }
-
-            let result = Image::from_raw_pixels((width, height), &pixels);
-
-            Ok(result)
-        }
-        Ok(Err(e)) => Err(e.into()),
-        Err(e) => Err(e.into()),
-    }
+    output_texture.pull_image(image.dimensions, &device, &queue)
 }
 
 pub async fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u8; 4]>> {
@@ -831,8 +843,6 @@ pub async fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<
 }
 
 pub async fn find(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -> Result<Image> {
-    let (width, height) = image.dimensions;
-
     let instance = Instance::new(Backends::all());
     let adapter = instance
         .request_adapter(&RequestAdapterOptionsBase {
@@ -925,18 +935,10 @@ pub async fn find(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -
         encoder.write_timestamp(query_set, 1);
     }
 
-    let output_buffer = output_texture.output_buffer(&device, &mut encoder);
-
     if let Some(query_set) = &query_set {
         encoder.resolve_query_set(query_set, 0..2, &query_buf, 0);
     }
     queue.submit(Some(encoder.finish()));
-
-    let buffer_slice = output_buffer.slice(..);
-    let (buffer_sender, buffer_receiver) = channel();
-    buffer_slice.map_async(MapMode::Read, move |v| {
-        buffer_sender.send(v).expect("Couldn't send result");
-    });
 
     let query_slice = query_buf.slice(..);
     let (query_sender, query_receiver) = channel();
@@ -957,25 +959,7 @@ pub async fn find(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -
         }
     }
 
-    match buffer_receiver.recv() {
-        Ok(Ok(())) => {
-            let padded_data = buffer_slice.get_mapped_range();
-            let mut pixels: Vec<u8> =
-                vec![0; output_buffer.unpadded_bytes_per_row * height as usize];
-            for (padded, pixels) in padded_data
-                .chunks_exact(output_buffer.padded_bytes_per_row)
-                .zip(pixels.chunks_exact_mut(output_buffer.unpadded_bytes_per_row))
-            {
-                pixels.copy_from_slice(&padded[..output_buffer.unpadded_bytes_per_row]);
-            }
-
-            let result = Image::from_raw_pixels((width, height), &pixels);
-
-            Ok(result)
-        }
-        Ok(Err(e)) => Err(e.into()),
-        Err(e) => Err(e.into()),
-    }
+    output_texture.pull_image(image.dimensions, &device, &queue)
 }
 
 pub async fn mix(
@@ -984,8 +968,6 @@ pub async fn mix(
     color_space: &ColorSpace,
     mix_mode: &MixMode,
 ) -> Result<Image> {
-    let (width, height) = image.dimensions;
-
     let instance = Instance::new(Backends::all());
     let adapter = instance
         .request_adapter(&RequestAdapterOptionsBase {
@@ -1113,18 +1095,10 @@ pub async fn mix(
         encoder.write_timestamp(query_set, 1);
     }
 
-    let output_buffer = output_texture.output_buffer(&device, &mut encoder);
-
     if let Some(query_set) = &query_set {
         encoder.resolve_query_set(query_set, 0..2, &query_buf, 0);
     }
     queue.submit(Some(encoder.finish()));
-
-    let buffer_slice = output_buffer.slice(..);
-    let (buffer_sender, buffer_receiver) = channel();
-    buffer_slice.map_async(MapMode::Read, move |v| {
-        buffer_sender.send(v).expect("Couldn't send result");
-    });
 
     let query_slice = query_buf.slice(..);
     let (query_sender, query_receiver) = channel();
@@ -1145,25 +1119,27 @@ pub async fn mix(
         }
     }
 
-    match buffer_receiver.recv() {
-        Ok(Ok(())) => {
-            let padded_data = buffer_slice.get_mapped_range();
-            let mut pixels: Vec<u8> =
-                vec![0; output_buffer.unpadded_bytes_per_row * height as usize];
-            for (padded, pixels) in padded_data
-                .chunks_exact(output_buffer.padded_bytes_per_row)
-                .zip(pixels.chunks_exact_mut(output_buffer.unpadded_bytes_per_row))
-            {
-                pixels.copy_from_slice(&padded[..output_buffer.unpadded_bytes_per_row]);
-            }
+    // match buffer_receiver.recv() {
+    //     Ok(Ok(())) => {
+    //         let padded_data = buffer_slice.get_mapped_range();
+    //         let mut pixels: Vec<u8> =
+    //             vec![0; output_buffer.unpadded_bytes_per_row * height as usize];
+    //         for (padded, pixels) in padded_data
+    //             .chunks_exact(output_buffer.padded_bytes_per_row)
+    //             .zip(pixels.chunks_exact_mut(output_buffer.unpadded_bytes_per_row))
+    //         {
+    //             pixels.copy_from_slice(&padded[..output_buffer.unpadded_bytes_per_row]);
+    //         }
 
-            let result = Image::from_raw_pixels((width, height), &pixels);
+    //         let result = Image::from_raw_pixels((width, height), &pixels);
 
-            Ok(result)
-        }
-        Ok(Err(e)) => Err(e.into()),
-        Err(e) => Err(e.into()),
-    }
+    //         Ok(result)
+    //     }
+    //     Ok(Err(e)) => Err(e.into()),
+    //     Err(e) => Err(e.into()),
+    // }
+
+    output_texture.pull_image(image.dimensions, &device, &queue)
 }
 
 pub async fn debug_plus_plus_init(k: u32, image: &Image, color_space: &ColorSpace) -> Result<()> {
