@@ -19,18 +19,18 @@ As this loads an image as a texture to your graphic cards, it also comes with so
 ### Create image with colors replaced by their kmeans variant:
 
 ```sh
-cargo run --release -- kmeans -i .\gfx\tokyo.png -k 6
+cargo run --release -- kmeans -i .\gfx\tokyo.png -k 8
 ```
 
-![Tokyo with k=6](gfx/tokyo-kmeans-lab-k6.png)
+![Tokyo with k=8](gfx/tokyo-kmeans-lab-k8.png)
 
 ### Output the palette:
 
 ```sh
-cargo run --release -- palette -i .\gfx\tokyo.png -k 6
+cargo run --release -- palette -i .\gfx\tokyo.png -k 8
 ```
 
-![Tokyo palette with k=6](gfx/tokyo-palette-lab-k6.png)
+![Tokyo palette with k=8](gfx/tokyo-palette-lab-k8.png)
 
 ### Find colors and use them as replacement
 
@@ -43,10 +43,10 @@ cargo run --release -- find -i .\gfx\tokyo.png -r "#050505,#ffffff,#ff0000"
 ### Dither image:
 
 ```sh
-cargo run --release -- mix -i .\gfx\tokyo.png -k 6
+cargo run --release -- mix -i .\gfx\tokyo.png -k 8
 ```
 
-![Tokyo dithered with k=6](gfx/tokyo-mix-dither-lab-k6.png)
+![Tokyo dithered with k=8](gfx/tokyo-mix-dither-lab-k8.png)
 
 ## Sources
 

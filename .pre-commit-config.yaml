@@ -3,4 +3,3 @@ repos:
     rev: v6.0.1
     hooks:
       - id: oxipng
-        args: [--zopfli]
