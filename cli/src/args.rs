@@ -4,9 +4,8 @@ use std::str::FromStr;
 
 use anyhow::anyhow;
 use anyhow::Result;
+use clap::ValueEnum;
 use clap::{Parser, Subcommand};
-use k_means_gpu::ColorSpace;
-use k_means_gpu::MixMode;
 use regex::Regex;
 
 #[derive(Parser)]
@@ -34,7 +33,7 @@ pub enum Commands {
         #[clap(short, long)]
         extension: Option<Extension>,
         /// The colorspace to use when calculating colors. Lab gives more natural colors
-        #[clap(short, long="colorspace", default_value_t=ColorSpace::Lab)]
+        #[clap(value_enum, short, long="colorspace", default_value_t=ColorSpace::Lab)]
         color_space: ColorSpace,
     },
     /// Output the palette calculated with k-means
@@ -49,7 +48,7 @@ pub enum Commands {
         #[clap(short, long, value_parser)]
         output: Option<PathBuf>,
         /// The colorspace to use when calculating colors. Lab gives more natural colors
-        #[clap(short, long="colorspace", default_value_t=ColorSpace::Lab)]
+        #[clap(value_enum, short, long="colorspace", default_value_t=ColorSpace::Lab)]
         color_space: ColorSpace,
     },
     /// Find colors in image that are closest to the replacements, and swap them
@@ -60,11 +59,11 @@ pub enum Commands {
         /// Optional output file
         #[clap(short, long, value_parser)]
         output: Option<PathBuf>,
-        /// List of RGB replacement colors, as #RRGGBB,#RRGGBB
+        /// List of RGB replacement colors formatted as "#RRGGBB,#RRGGBB"
         #[clap(short, long, value_parser = validate_replacement)]
         replacement: String,
         /// The colorspace to use when calculating colors. Lab gives more natural colors
-        #[clap(short, long="colorspace", default_value_t=ColorSpace::Lab)]
+        #[clap(value_enum, short, long="colorspace", default_value_t=ColorSpace::Lab)]
         color_space: ColorSpace,
     },
     /// Quantized the image with kmeans, then mix it's resulting color.
@@ -82,10 +81,10 @@ pub enum Commands {
         #[clap(short, long)]
         extension: Option<Extension>,
         /// The colorspace to use when calculating colors. Lab gives more natural colors
-        #[clap(short, long="colorspace", default_value_t=ColorSpace::Lab)]
+        #[clap(value_enum, short, long="colorspace", default_value_t=ColorSpace::Lab)]
         color_space: ColorSpace,
         /// Mix function to apply on the result
-        #[clap(short, long="mixmode", default_value_t=MixMode::Dither)]
+        #[clap(value_enum, short, long="mixmode", default_value_t=MixMode::Dither)]
         mix_mode: MixMode,
     },
     Debug {
@@ -99,6 +98,36 @@ pub enum Commands {
 pub enum Extension {
     Png,
     Jpg,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub enum MixMode {
+    Dither,
+    Meld,
+}
+
+impl From<MixMode> for k_means_gpu::MixMode {
+    fn from(mix_mode: MixMode) -> Self {
+        match mix_mode {
+            MixMode::Dither => k_means_gpu::MixMode::Dither,
+            MixMode::Meld => k_means_gpu::MixMode::Meld,
+        }
+    }
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub enum ColorSpace {
+    Lab,
+    Rgb,
+}
+
+impl From<ColorSpace> for k_means_gpu::ColorSpace {
+    fn from(color_space: ColorSpace) -> Self {
+        match color_space {
+            ColorSpace::Lab => k_means_gpu::ColorSpace::Lab,
+            ColorSpace::Rgb => k_means_gpu::ColorSpace::Rgb,
+        }
+    }
 }
 
 impl Extension {

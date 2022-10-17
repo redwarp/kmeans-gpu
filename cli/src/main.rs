@@ -27,19 +27,19 @@ fn main() -> Result<()> {
             output,
             extension,
             color_space,
-        } => kmeans_subcommand(k, input, output, extension, color_space).block_on(),
+        } => kmeans_subcommand(k, input, output, extension, color_space.into()).block_on(),
         Commands::Palette {
             k,
             input,
             output,
             color_space,
-        } => palette_subcommand(k, input, output, color_space).block_on(),
+        } => palette_subcommand(k, input, output, color_space.into()).block_on(),
         Commands::Find {
             input,
             output,
             replacement,
             color_space,
-        } => find_subcommand(input, output, replacement, color_space).block_on(),
+        } => find_subcommand(input, output, replacement, color_space.into()).block_on(),
         Commands::Mix {
             k,
             input,
@@ -47,7 +47,15 @@ fn main() -> Result<()> {
             extension,
             color_space,
             mix_mode,
-        } => mix_subcommand(k, input, output, extension, color_space, mix_mode).block_on(),
+        } => mix_subcommand(
+            k,
+            input,
+            output,
+            extension,
+            color_space.into(),
+            mix_mode.into(),
+        )
+        .block_on(),
         Commands::Debug { k } => debug_subcommand(k).block_on(),
     }?;
 
