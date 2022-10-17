@@ -102,16 +102,15 @@ fn main(
     }
 
     scratch[local_id.x] = local;
-    workgroupBarrier();
     
     for (var i: u32 = 0u; i < 8u; i = i + 1u) {
+        workgroupBarrier();
         if (local_id.x >= (1u << i)) {
             local.color = local.color + scratch[local_id.x - (1u << i)].color;
             local.count = local.count + scratch[local_id.x - (1u << i)].count;
         }
         workgroupBarrier();
         scratch[local_id.x] = local;
-        workgroupBarrier();
     }
     
     var exclusive_prefix = ColorAggregator(vec3<f32>(0.0), 0u);

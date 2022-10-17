@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use modules::{
-    ChooseCentroidModule, ColorConverterModule, ColorReverterModule, FindCentroidModule,
-    MixColorsModule, Module, PlusPlusInitModule, SwapModule,
+    ChooseCentroidLoopModule, ChooseCentroidModule, ColorConverterModule, ColorReverterModule,
+    FindCentroidModule, MixColorsModule, Module, PlusPlusInitModule, SwapModule,
 };
 use palette::{IntoColor, Lab, Pixel, Srgb, Srgba};
 use std::{fmt::Display, ops::Deref, str::FromStr, sync::mpsc::channel, vec};
@@ -629,7 +629,7 @@ pub async fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<I
 
     queue.submit(Some(encoder.finish()));
 
-    choose_centroid_module.compute(&device, &queue).await;
+    choose_centroid_module.compute(&device, &queue);
 
     let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
     {
@@ -791,7 +791,7 @@ pub async fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<
 
     queue.submit(Some(encoder.finish()));
 
-    choose_centroid_module.compute(&device, &queue).await;
+    choose_centroid_module.compute(&device, &queue);
 
     let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
     if let Some(query_set) = &query_set {
@@ -1131,7 +1131,7 @@ pub async fn mix(
 
     queue.submit(Some(encoder.finish()));
 
-    choose_centroid_module.compute(&device, &queue).await;
+    choose_centroid_module.compute(&device, &queue);
 
     let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
     {
@@ -1243,7 +1243,7 @@ pub async fn debug_plus_plus_init(k: u32, image: &Image, color_space: &ColorSpac
 
     let mut results = vec![];
 
-    let try_count = 1000;
+    let try_count = 100;
     for _ in 0..try_count {
         let centroids_buffer = CentroidsBuffer::empty_centroids(k, &device);
 
@@ -1261,6 +1261,147 @@ pub async fn debug_plus_plus_init(k: u32, image: &Image, color_space: &ColorSpac
 
     println!(
         "There are {count} unique results after init after {try_count} tries",
+        count = results.len()
+    );
+
+    if results.len() == 1 {
+        let colors = results[0]
+            .iter()
+            .map(|color| format!("#{:02X}{:02X}{:02X}", color[0], color[1], color[2]))
+            .collect::<Vec<_>>()
+            .join(",");
+
+        println!("Colors: {colors}");
+    }
+
+    Ok(())
+}
+
+pub async fn debug_conversion(k: u32, image: &Image) -> Result<()> {
+    let instance = Instance::new(Backends::all());
+    let adapter = instance
+        .request_adapter(&RequestAdapterOptionsBase {
+            power_preference: PowerPreference::HighPerformance,
+            force_fallback_adapter: false,
+            compatible_surface: None,
+        })
+        .await
+        .ok_or_else(|| anyhow::anyhow!("Couldn't create the adapter"))?;
+
+    let features = adapter.features();
+    let (device, queue) = adapter
+        .request_device(
+            &DeviceDescriptor {
+                label: None,
+                features: features & (Features::TIMESTAMP_QUERY),
+                limits: Default::default(),
+            },
+            None,
+        )
+        .await?;
+
+    let input_texture = InputTexture::new(&device, &queue, image);
+    let work_texture = WorkTexture::new(&device, image);
+    let color_converter_module = ColorConverterModule::new(
+        &device,
+        &ColorSpace::Lab,
+        image.dimensions,
+        &input_texture,
+        &work_texture,
+    );
+
+    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
+
+    {
+        let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+            label: Some("Init pass"),
+        });
+        color_converter_module.dispatch(&mut compute_pass);
+    }
+    queue.submit(Some(encoder.finish()));
+
+    let mut results: Vec<Vec<[u8; 4]>> = vec![];
+
+    let try_count = 1000;
+    for _ in 0..try_count {
+        let centroids_buffer = CentroidsBuffer::fixed_centroids(
+            &[
+                [42, 18, 19, 255],
+                [253, 250, 56, 255],
+                [49, 49, 245, 255],
+                [255, 3, 1, 255],
+                [83, 251, 250, 255],
+                [241, 175, 235, 255],
+                [0, 112, 10, 255],
+                [201, 136, 75, 255],
+                [30, 66, 157, 255],
+                [122, 253, 113, 255],
+                [59, 121, 143, 255],
+                [169, 33, 65, 255],
+                [230, 249, 180, 255],
+                [89, 95, 53, 255],
+                [228, 241, 253, 255],
+                [143, 146, 0, 255],
+                [254, 126, 12, 255],
+                [17, 154, 121, 255],
+                [78, 169, 252, 255],
+                [152, 103, 115, 255],
+                [103, 44, 3, 255],
+                [2, 239, 176, 255],
+                [0, 2, 55, 255],
+                [255, 191, 54, 255],
+                [255, 102, 84, 255],
+                [253, 185, 178, 255],
+                [25, 15, 152, 255],
+                [79, 101, 249, 255],
+                [159, 174, 147, 255],
+                [0, 45, 33, 255],
+                [113, 190, 104, 255],
+                [160, 0, 0, 255],
+            ],
+            &ColorSpace::Lab,
+            &device,
+        );
+        let color_index_texture = ColorIndexTexture::new(&device, image);
+
+        let find_centroid_module = FindCentroidModule::new(
+            &device,
+            image.dimensions,
+            &work_texture,
+            &centroids_buffer,
+            &color_index_texture,
+        );
+        let choose_centroid_module = ChooseCentroidLoopModule::new(
+            &device,
+            &ColorSpace::Lab,
+            image.dimensions,
+            k,
+            &work_texture,
+            &centroids_buffer,
+            &color_index_texture,
+        );
+
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
+        {
+            let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                label: Some("Find centroid pass"),
+            });
+            find_centroid_module.dispatch(&mut compute_pass);
+        }
+        queue.submit(Some(encoder.finish()));
+
+        choose_centroid_module.compute(&device, &queue);
+
+        let centroids = centroids_buffer.pull_values(&device, &queue, &ColorSpace::Lab)?;
+
+        results.push(centroids);
+    }
+
+    results.sort();
+    results.dedup();
+
+    println!(
+        "There are {count} unique results after choosing centroids with {try_count} tries",
         count = results.len()
     );
 
