@@ -244,7 +244,7 @@ impl SwapModule {
         device: &Device,
         image_dimensions: (u32, u32),
         work_texture: &WorkTexture,
-        centroid_buffer: &CentroidsBuffer,
+        centroids_buffer: &CentroidsBuffer,
         color_index_texture: &ColorIndexTexture,
     ) -> Self {
         let swap_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -285,7 +285,7 @@ impl SwapModule {
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: centroid_buffer.as_entire_binding(),
+                    resource: centroids_buffer.as_entire_binding(),
                 },
                 BindGroupEntry {
                     binding: 1,
@@ -343,7 +343,7 @@ impl FindCentroidModule {
         device: &Device,
         image_dimensions: (u32, u32),
         work_texture: &WorkTexture,
-        centroid_buffer: &CentroidsBuffer,
+        centroids_buffer: &CentroidsBuffer,
         color_index_texture: &ColorIndexTexture,
     ) -> Self {
         let find_centroid_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -414,7 +414,7 @@ impl FindCentroidModule {
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: centroid_buffer.as_entire_binding(),
+                    resource: centroids_buffer.as_entire_binding(),
                 },
                 BindGroupEntry {
                     binding: 2,
@@ -466,7 +466,7 @@ impl ChooseCentroidLoopModule {
         image_dimensions: (u32, u32),
         k: u32,
         work_texture: &WorkTexture,
-        centroid_buffer: &CentroidsBuffer,
+        centroids_buffer: &CentroidsBuffer,
         color_index_texture: &ColorIndexTexture,
     ) -> Self {
         const WORKGROUP_SIZE: u32 = 256;
@@ -536,7 +536,7 @@ impl ChooseCentroidLoopModule {
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: centroid_buffer.as_entire_binding(),
+                    resource: centroids_buffer.as_entire_binding(),
                 },
                 BindGroupEntry {
                     binding: 1,
@@ -763,7 +763,7 @@ impl ChooseCentroidLoopModule {
 
 pub(crate) struct ChooseCentroidModule<'a> {
     k: u32,
-    pipeline: ComputePipeline,
+    choose_pipeline: ComputePipeline,
     pick_pipeline: ComputePipeline,
     bind_group_0: BindGroup,
     bind_group_1: BindGroup,
@@ -771,7 +771,7 @@ pub(crate) struct ChooseCentroidModule<'a> {
     dispatch_size: u32,
     convergence_buffer: ConvergenceBuffer,
     find_centroid_module: &'a FindCentroidModule,
-    centroid_buffer: &'a CentroidsBuffer,
+    centroids_buffer: &'a CentroidsBuffer,
 }
 
 impl<'a> ChooseCentroidModule<'a> {
@@ -782,7 +782,7 @@ impl<'a> ChooseCentroidModule<'a> {
         image_dimensions: (u32, u32),
         k: u32,
         work_texture: &WorkTexture,
-        centroid_buffer: &'a CentroidsBuffer,
+        centroids_buffer: &'a CentroidsBuffer,
         color_index_texture: &ColorIndexTexture,
         find_centroid_module: &'a FindCentroidModule,
     ) -> Self {
@@ -853,7 +853,7 @@ impl<'a> ChooseCentroidModule<'a> {
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: centroid_buffer.as_entire_binding(),
+                    resource: centroids_buffer.as_entire_binding(),
                 },
                 BindGroupEntry {
                     binding: 1,
@@ -1036,7 +1036,7 @@ impl<'a> ChooseCentroidModule<'a> {
                 ],
                 push_constant_ranges: &[],
             });
-        let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+        let choose_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("Choose centroid pipeline"),
             layout: Some(&choose_centroid_pipeline_layout),
             module: &choose_centroid_shader,
@@ -1052,7 +1052,7 @@ impl<'a> ChooseCentroidModule<'a> {
 
         Self {
             k,
-            pipeline,
+            choose_pipeline,
             pick_pipeline,
             bind_group_0: choose_centroid_bind_group_0,
             bind_group_1: choose_centroid_bind_group_1,
@@ -1063,7 +1063,7 @@ impl<'a> ChooseCentroidModule<'a> {
                 mapped_buffer: check_convergence_buffer,
             },
             find_centroid_module,
-            centroid_buffer,
+            centroids_buffer,
         }
     }
 
@@ -1089,7 +1089,7 @@ impl<'a> ChooseCentroidModule<'a> {
                 compute_pass.set_bind_group(1, &self.bind_group_1, &[]);
                 for k in k_start..max_k {
                     compute_pass.set_bind_group(2, &self.bind_groups[k as usize], &[]);
-                    compute_pass.set_pipeline(&self.pipeline);
+                    compute_pass.set_pipeline(&self.choose_pipeline);
                     compute_pass.dispatch_workgroups(self.dispatch_size, 1, 1);
                     compute_pass.set_pipeline(&self.pick_pipeline);
                     compute_pass.dispatch_workgroups(1, 1, 1);
@@ -1153,7 +1153,7 @@ impl<'a> ChooseCentroidModule<'a> {
             let mut encoder =
                 device.create_command_encoder(&CommandEncoderDescriptor { label: None });
 
-            let staging_buffer = self.centroid_buffer.staging_buffer(device, &mut encoder);
+            let staging_buffer = self.centroids_buffer.staging_buffer(device, &mut encoder);
 
             queue.submit(Some(encoder.finish()));
             let cent_buffer_slice = staging_buffer.slice(..);
@@ -1232,7 +1232,7 @@ impl DistanceMapTexture {
 pub(crate) struct PlusPlusInitModule<'a> {
     k: u32,
     image_dimensions: (u32, u32),
-    centroid_buffer: &'a CentroidsBuffer,
+    centroids_buffer: &'a CentroidsBuffer,
     work_texture: &'a WorkTexture,
 }
 
@@ -1241,17 +1241,17 @@ impl<'a> PlusPlusInitModule<'a> {
         image_dimensions: (u32, u32),
         k: u32,
         work_texture: &'a WorkTexture,
-        centroid_buffer: &'a CentroidsBuffer,
+        centroids_buffer: &'a CentroidsBuffer,
     ) -> Self {
         Self {
             k,
             image_dimensions,
-            centroid_buffer,
+            centroids_buffer,
             work_texture,
         }
     }
 
-    pub(crate) async fn compute(&self, device: &Device, queue: &Queue) {
+    pub(crate) fn compute(&self, device: &Device, queue: &Queue) {
         const WORKGROUP_SIZE: u32 = 256;
         const N_SEQ: u32 = 16;
         const MAX_OPERATIONS_CHAIN: usize = 32;
@@ -1349,7 +1349,7 @@ impl<'a> PlusPlusInitModule<'a> {
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: self.centroid_buffer.as_entire_binding(),
+                    resource: self.centroids_buffer.as_entire_binding(),
                 },
                 BindGroupEntry {
                     binding: 1,
@@ -1486,7 +1486,7 @@ impl<'a> PlusPlusInitModule<'a> {
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: self.centroid_buffer.as_entire_binding(),
+                    resource: self.centroids_buffer.as_entire_binding(),
                 },
                 BindGroupEntry {
                     binding: 1,
@@ -1558,7 +1558,7 @@ impl<'a> PlusPlusInitModule<'a> {
             let mut encoder =
                 device.create_command_encoder(&CommandEncoderDescriptor { label: None });
             encoder.copy_buffer_to_buffer(
-                self.centroid_buffer,
+                self.centroids_buffer,
                 0,
                 &staging_buffer,
                 0,

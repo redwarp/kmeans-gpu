@@ -17,7 +17,6 @@ use wgpu::{
 
 mod modules;
 mod utils;
-
 pub struct Image {
     pub(crate) dimensions: (u32, u32),
     pub(crate) rgba: Vec<[u8; 4]>,
@@ -617,7 +616,7 @@ pub async fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<I
     }
     queue.submit(Some(encoder.finish()));
 
-    plus_plus_init_module.compute(&device, &queue).await;
+    plus_plus_init_module.compute(&device, &queue);
 
     let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
     {
@@ -779,7 +778,7 @@ pub async fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<
     }
     queue.submit(Some(encoder.finish()));
 
-    plus_plus_init_module.compute(&device, &queue).await;
+    plus_plus_init_module.compute(&device, &queue);
 
     let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
     {
@@ -798,27 +797,19 @@ pub async fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<
         encoder.write_timestamp(query_set, 1);
     }
 
-    let staging_buffer = centroids_buffer.staging_buffer(&device, &mut encoder);
-
-    if let Some(query_set) = &query_set {
-        encoder.resolve_query_set(query_set, 0..2, &query_buf, 0);
-    }
-    queue.submit(Some(encoder.finish()));
-
-    let cent_buffer_slice = staging_buffer.slice(..);
-    let (cent_sender, cent_receiver) = channel();
-    cent_buffer_slice.map_async(MapMode::Read, move |v| {
-        cent_sender.send(v).expect("Couldn't send result");
-    });
-
-    let query_slice = query_buf.slice(..);
-    let (query_sender, query_receiver) = channel();
-    query_slice.map_async(MapMode::Read, move |v| {
-        query_sender.send(v).expect("Couldn't send result");
-    });
-
-    device.poll(wgpu::Maintain::Wait);
     if features.contains(Features::TIMESTAMP_QUERY) {
+        if let Some(query_set) = &query_set {
+            encoder.resolve_query_set(query_set, 0..2, &query_buf, 0);
+        }
+        queue.submit(Some(encoder.finish()));
+
+        let query_slice = query_buf.slice(..);
+        let (query_sender, query_receiver) = channel();
+        query_slice.map_async(MapMode::Read, move |v| {
+            query_sender.send(v).expect("Couldn't send result");
+        });
+
+        device.poll(wgpu::Maintain::Wait);
         if let Ok(Ok(())) = query_receiver.recv() {
             let ts_period = queue.get_timestamp_period();
             let ts_data_raw = &*query_slice.get_mapped_range();
@@ -830,36 +821,13 @@ pub async fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<
         }
     }
 
-    match cent_receiver.recv() {
-        Ok(Ok(())) => {
-            let data = cent_buffer_slice.get_mapped_range();
-
-            let mut colors: Vec<_> = bytemuck::cast_slice::<u8, f32>(&data[16..])
-                .chunks_exact(4)
-                .map(|color| {
-                    let raw: [u8; 4] = match color_space {
-                        ColorSpace::Lab => {
-                            IntoColor::<Srgba>::into_color(Lab::new(color[0], color[1], color[2]))
-                                .into_format()
-                                .into_raw()
-                        }
-                        ColorSpace::Rgb => Srgba::new(color[0], color[1], color[2], 1.0)
-                            .into_format()
-                            .into_raw(),
-                    };
-                    raw
-                })
-                .collect();
-            colors.sort_unstable_by(|a, b| {
-                let a: Lab = Srgba::from_raw(a).into_format::<_, f32>().into_color();
-                let b: Lab = Srgba::from_raw(b).into_format::<_, f32>().into_color();
-                a.l.partial_cmp(&b.l).unwrap()
-            });
-            Ok(colors)
-        }
-        Ok(Err(e)) => Err(e.into()),
-        Err(e) => Err(e.into()),
-    }
+    let mut colors = centroids_buffer.pull_values(&device, &queue, color_space)?;
+    colors.sort_unstable_by(|a, b| {
+        let a: Lab = Srgba::from_raw(a).into_format::<_, f32>().into_color();
+        let b: Lab = Srgba::from_raw(b).into_format::<_, f32>().into_color();
+        a.l.partial_cmp(&b.l).unwrap()
+    });
+    Ok(colors)
 }
 
 pub async fn find(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -> Result<Image> {
@@ -1119,7 +1087,7 @@ pub async fn mix(
     }
     queue.submit(Some(encoder.finish()));
 
-    plus_plus_init_module.compute(&device, &queue).await;
+    plus_plus_init_module.compute(&device, &queue);
 
     let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
     {
@@ -1249,7 +1217,7 @@ pub async fn debug_plus_plus_init(k: u32, image: &Image, color_space: &ColorSpac
 
         let plus_plus_init_module =
             PlusPlusInitModule::new(image.dimensions, k, &work_texture, &centroids_buffer);
-        plus_plus_init_module.compute(&device, &queue).await;
+        plus_plus_init_module.compute(&device, &queue);
 
         let centroids = centroids_buffer.pull_values(&device, &queue, color_space)?;
 
