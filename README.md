@@ -6,10 +6,6 @@ Totally 100% inspired by [kmeans-colors](https://github.com/okaneco/kmeans-color
 
 ## Limitation
 
-Not there yet.
-
-* Currently initialize centroids with random values, should look how complex it is to paralellize kmean++ init.
-
 As this loads an image as a texture to your graphic cards, it also comes with some limitation based on the GPU backends: It won't work if the original image is bigger than **8192x8192** pixels.
 
 ## Sample
