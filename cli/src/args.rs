@@ -91,6 +91,9 @@ pub enum Commands {
         /// K value, aka the number of colors we want to extract
         #[clap(short, value_parser = validate_k)]
         k: u32,
+        /// Input file
+        #[clap(short, long, value_parser = validate_filenames)]
+        input: PathBuf,
     },
 }
 

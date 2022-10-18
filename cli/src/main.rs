@@ -9,7 +9,8 @@ use args::{Cli, Commands, Extension};
 use clap::Parser;
 use image::{ImageBuffer, Rgba};
 use k_means_gpu::{
-    debug_conversion, debug_plus_plus_init, find, kmeans, mix, palette, ColorSpace, Image, MixMode,
+    debug::{debug_conversion, debug_plus_plus_init},
+    find, kmeans, mix, palette, ColorSpace, Image, MixMode,
 };
 use pollster::FutureExt;
 
@@ -56,7 +57,7 @@ fn main() -> Result<()> {
             mix_mode.into(),
         )
         .block_on(),
-        Commands::Debug { k } => debug_subcommand(k).block_on(),
+        Commands::Debug { k, input } => debug_subcommand(k, input).block_on(),
     }?;
 
     Ok(())
@@ -162,14 +163,11 @@ async fn mix_subcommand(
     Ok(())
 }
 
-async fn debug_subcommand(k: u32) -> Result<()> {
-    let mut file = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    file.push("../gfx/tokyo.png");
+async fn debug_subcommand(k: u32, input: PathBuf) -> Result<()> {
+    let image = Image::open(&input)?;
 
-    let image = Image::open(&file)?;
-
-    debug_plus_plus_init(k, &image, &ColorSpace::Lab).await?;
-    debug_conversion(k, &image).await?;
+    let starting_centroids = debug_plus_plus_init(k, &image, &ColorSpace::Lab).await?;
+    debug_conversion(k, &image, &starting_centroids).await?;
 
     Ok(())
 }
