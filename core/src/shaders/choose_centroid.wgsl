@@ -46,18 +46,18 @@ fn in_bounds(global_x: u32, dimensions: vec2<i32>) -> bool {
     return global_x < u32(dimensions.x) * u32(dimensions.y);
 }
 
-fn match_centroid(k: u32, coords: vec2<i32>) -> bool {
+fn matches_centroid(k: u32, coords: vec2<i32>) -> bool {
     return k == textureLoad(color_indices, coords, 0).r;
 }
 
-fn atomicStorePrefixVec(index: u32, value: ColorAggregator) {
+fn atomicStoreAggregator(index: u32, value: ColorAggregator) {
     atomicStore(&prefix_buffer[index + 0u], bitcast<u32>(value.color.r));
     atomicStore(&prefix_buffer[index + 1u], bitcast<u32>(value.color.g));
     atomicStore(&prefix_buffer[index + 2u], bitcast<u32>(value.color.b));
     atomicStore(&prefix_buffer[index + 3u], value.count);
 }
 
-fn atomicLoadPrefixVec(index: u32) -> ColorAggregator {
+fn atomicLoadAggregator(index: u32) -> ColorAggregator {
     var value: ColorAggregator;
     let r = bitcast<f32>(atomicLoad(&prefix_buffer[index + 0u]));
     let g = bitcast<f32>(atomicLoad(&prefix_buffer[index + 1u]));
@@ -95,7 +95,7 @@ fn main(
     for (var i: u32 = 0u; i < N_SEQ; i = i + 1u) {
         let index = global_x * N_SEQ + i;
         let coords = coords(index, dimensions);
-        if (in_bounds(index, dimensions) && match_centroid(k, coords)) {
+        if (in_bounds(index, dimensions) && matches_centroid(k, coords)) {
             local.color = local.color + textureLoad(pixels, coords, 0).rgb;
             local.count = local.count + 1u;
         }
@@ -117,10 +117,10 @@ fn main(
     var flag = FLAG_AGGREGATE_READY;
     
     if (local_id.x == workgroup_size - 1u) {
-        atomicStorePrefixVec(workgroup_x * 8u + 4u, local);
+        atomicStoreAggregator(workgroup_x * 8u + 4u, local);
         if (workgroup_x == 0u) {
             // Special case, group 0 will not need to sum prefix.
-            atomicStorePrefixVec(workgroup_x * 8u + 0u, local);
+            atomicStoreAggregator(workgroup_x * 8u + 0u, local);
             flag = FLAG_PREFIX_READY;
         }
     }
@@ -144,14 +144,14 @@ fn main(
             storageBarrier();
             if (flag == FLAG_PREFIX_READY) {
                 if (local_id.x == workgroup_size - 1u) {
-                    let their_prefix = atomicLoadPrefixVec(loop_back_ix * 8u);
+                    let their_prefix = atomicLoadAggregator(loop_back_ix * 8u);
                     exclusive_prefix.color = exclusive_prefix.color + their_prefix.color;
                     exclusive_prefix.count = exclusive_prefix.count + their_prefix.count;
                 }
                 break;
             } else if (flag == FLAG_AGGREGATE_READY) {                
                 if (local_id.x == workgroup_size - 1u) {                    
-                    let their_aggregate = atomicLoadPrefixVec(loop_back_ix * 8u + 4u);
+                    let their_aggregate = atomicLoadAggregator(loop_back_ix * 8u + 4u);
                     exclusive_prefix.color = their_aggregate.color + exclusive_prefix.color;
                     exclusive_prefix.count = their_aggregate.count + exclusive_prefix.count;
                 }
@@ -166,7 +166,7 @@ fn main(
             inclusive_prefix.color = exclusive_prefix.color + local.color;
             inclusive_prefix.count = exclusive_prefix.count + local.count;
             
-            atomicStorePrefixVec(workgroup_x * 8u + 0u, inclusive_prefix);
+            atomicStoreAggregator(workgroup_x * 8u + 0u, inclusive_prefix);
         }
         storageBarrier();
         if (local_id.x == workgroup_size - 1u) {
@@ -179,7 +179,7 @@ fn main(
 @workgroup_size(1)
 fn pick() {
     let dimensions = textureDimensions(pixels);
-    let sum = atomicLoadPrefixVec(last_group_idx() * 8u + 0u);
+    let sum = atomicLoadAggregator(last_group_idx() * 8u + 0u);
     let k = k_index;
     if(sum.count > 0u) {
         let new_centroid = vec4<f32>(sum.color / f32(sum.count), 1.0);

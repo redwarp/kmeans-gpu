@@ -45,16 +45,52 @@ fn two_closest_colors(color: vec4<f32>) -> array<vec4<f32>, 2> {
     return values;
 }
 
-fn dither(color: vec4<f32>, coords: vec2<i32>) -> vec4<f32> {
-    let closest_colors = two_closest_colors(color);
-    let index_value = index_value(coords);
-    let factor = distance(color.rgb, closest_colors[0].rgb) / distance(closest_colors[0].rgb, closest_colors[1].rgb);
+fn dither_variable_threshold(color: vec4<f32>, coords: vec2<i32>) -> vec4<f32> {
+    // Based on https://en.wikipedia.org/wiki/Ordered_dithering
+    var r_min: vec3<f32> = vec3<f32>(10000.0);
+    var r_max: vec3<f32> = vec3<f32>(-10000.0);
+    for (var i: u32 = 0u; i < centroids.count; i = i + 1u) {
+        let color = centroids.data[i].rgb;
+        if (color.r < r_min.r) {
+            r_min.r = color.r;
+        }
+        if (color.r > r_max.r) {
+            r_max.r = color.r;
+        }
+        if (color.g < r_min.g) {
+            r_min.g = color.g;
+        }
+        if (color.g > r_max.g) {
+            r_max.g = color.g;
+        }
+        if (color.b < r_min.b) {
+            r_min.b = color.b;
+        }
+        if (color.b > r_max.b) {
+            r_max.b = color.b;
+        }
+    }
+    let r = (r_max - r_min) / sqrt(f32(centroids.count));
 
-    return select(closest_colors[1], closest_colors[0], factor < index_value);
+    let threshold = vec3<f32>(r.r, 0.0, 0.0);
+    let index_value = index_value(coords) - 0.5;
+
+    let adjusted = color.rgb + threshold * index_value;
+    
+    var closest = vec3<f32>(10000.0);
+    for (var i: u32 = 0u; i < centroids.count; i = i + 1u) {
+        let temp = centroids.data[i].rgb;
+        let temp_distance = distance(adjusted, temp);
+        if (temp_distance < distance(adjusted, closest)){
+            closest = temp;
+        }
+    }
+    return vec4<f32>(closest, 1.0);
 }
 
-fn dither2(color: vec4<f32>, coords: vec2<i32>) -> vec4<f32> {
+fn dither(color: vec4<f32>, coords: vec2<i32>) -> vec4<f32> {
     // Based on https://en.wikipedia.org/wiki/Ordered_dithering
+    // This threshold is not the best as it only works in LAB color space.
     let threshold = vec3<f32>(100.0 / sqrt(f32(centroids.count)), 0.0, 0.0);
     let index_value = index_value(coords) - 0.5;
 
@@ -93,7 +129,7 @@ fn main_dither(
 
     let color = textureLoad(input_texture, coords, 0);
 
-    textureStore(output_texture, coords, dither2(color, coords));
+    textureStore(output_texture, coords, dither(color, coords));
 }
 
 @compute

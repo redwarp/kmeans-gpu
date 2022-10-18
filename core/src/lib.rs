@@ -1119,26 +1119,6 @@ pub async fn mix(
         }
     }
 
-    // match buffer_receiver.recv() {
-    //     Ok(Ok(())) => {
-    //         let padded_data = buffer_slice.get_mapped_range();
-    //         let mut pixels: Vec<u8> =
-    //             vec![0; output_buffer.unpadded_bytes_per_row * height as usize];
-    //         for (padded, pixels) in padded_data
-    //             .chunks_exact(output_buffer.padded_bytes_per_row)
-    //             .zip(pixels.chunks_exact_mut(output_buffer.unpadded_bytes_per_row))
-    //         {
-    //             pixels.copy_from_slice(&padded[..output_buffer.unpadded_bytes_per_row]);
-    //         }
-
-    //         let result = Image::from_raw_pixels((width, height), &pixels);
-
-    //         Ok(result)
-    //     }
-    //     Ok(Err(e)) => Err(e.into()),
-    //     Err(e) => Err(e.into()),
-    // }
-
     output_texture.pull_image(image.dimensions, &device, &queue)
 }
 
