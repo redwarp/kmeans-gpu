@@ -144,7 +144,7 @@ pub async fn debug_conversion(k: u32, image: &Image, starting_centroids: &[[u8; 
     let mut results: Vec<Vec<[u8; 4]>> = vec![];
 
     let try_count = 1000;
-    for _ in 0..try_count {
+    for i in 0..try_count {
         let centroids_buffer =
             CentroidsBuffer::fixed_centroids(starting_centroids, &ColorSpace::Lab, &device);
         let color_index_texture = ColorIndexTexture::new(&device, image);
@@ -175,7 +175,14 @@ pub async fn debug_conversion(k: u32, image: &Image, starting_centroids: &[[u8; 
         }
         queue.submit(Some(encoder.finish()));
 
-        for _ in 0..10 {
+        if i == 0 {
+            println!(
+                "Dispatch size for choose: {size}",
+                size = choose_centroid_module.dispatch_size
+            );
+        }
+
+        for _ in 0..1 {
             choose_centroid_module.compute(&device, &queue);
             let mut encoder =
                 device.create_command_encoder(&CommandEncoderDescriptor { label: None });

@@ -455,11 +455,10 @@ pub(crate) struct ChooseCentroidLoopModule {
     bind_group_0: BindGroup,
     bind_group_1: BindGroup,
     bind_groups: Vec<BindGroup>,
-    dispatch_size: u32,
+    pub dispatch_size: u32,
 }
 
 impl ChooseCentroidLoopModule {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         device: &Device,
         color_space: &ColorSpace,
@@ -571,14 +570,14 @@ impl ChooseCentroidLoopModule {
             (image_dimensions.0 * image_dimensions.1, 1),
             (WORKGROUP_SIZE * N_SEQ, 1),
         );
-        let color_buffer_size = dispatch_size * 8 * 4;
+        let color_buffer_size = dispatch_size as usize * std::mem::size_of::<u32>() * 8;
         let color_buffer = device.create_buffer(&BufferDescriptor {
             label: None,
             size: color_buffer_size as BufferAddress,
             usage: BufferUsages::STORAGE,
             mapped_at_creation: false,
         });
-        let flag_buffer_size = dispatch_size * 4;
+        let flag_buffer_size = dispatch_size as usize * std::mem::size_of::<u32>();
         let flag_buffer = device.create_buffer(&BufferDescriptor {
             label: None,
             size: flag_buffer_size as BufferAddress,
