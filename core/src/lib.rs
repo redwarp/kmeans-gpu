@@ -847,7 +847,7 @@ pub async fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<
             let ts_data_raw = &*query_slice.get_mapped_range();
             let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
             println!(
-                "Compute shader elapsed: {:?}ms",
+                "Compute shader elapsed: {:?}ms [palette]",
                 (ts_data[1] - ts_data[0]) as f64 * ts_period as f64 * 1e-6
             );
         }
@@ -973,7 +973,7 @@ pub async fn find(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -
             let ts_data_raw = &*query_slice.get_mapped_range();
             let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
             println!(
-                "Compute shader elapsed: {:?}ms",
+                "Compute shader elapsed: {:?}ms [find]",
                 (ts_data[1] - ts_data[0]) as f64 * ts_period as f64 * 1e-6
             );
         }
@@ -988,6 +988,8 @@ pub async fn mix(
     color_space: &ColorSpace,
     mix_mode: &MixMode,
 ) -> Result<Image> {
+    let colors = palette(k, image, color_space).await?;
+
     let instance = Instance::new(Backends::all());
     let adapter = instance
         .request_adapter(&RequestAdapterOptionsBase {
@@ -1010,7 +1012,7 @@ pub async fn mix(
         )
         .await?;
 
-    let centroids_buffer = CentroidsBuffer::empty_centroids(k, &device);
+    let centroids_buffer = CentroidsBuffer::fixed_centroids(&colors, color_space, &device);
 
     let query_set = if features.contains(Features::TIMESTAMP_QUERY) {
         Some(device.create_query_set(&QuerySetDescriptor {
@@ -1033,31 +1035,12 @@ pub async fn mix(
     let color_index_texture = ColorIndexTexture::new(&device, image);
     let output_texture = OutputTexture::new(&device, image);
 
-    let plus_plus_init_module =
-        PlusPlusInitModule::new(image.dimensions, k, &work_texture, &centroids_buffer);
     let color_converter_module = ColorConverterModule::new(
         &device,
         color_space,
         image.dimensions,
         &input_texture,
         &work_texture,
-    );
-    let find_centroid_module = FindCentroidModule::new(
-        &device,
-        image.dimensions,
-        &work_texture,
-        &centroids_buffer,
-        &color_index_texture,
-    );
-    let choose_centroid_module = ChooseCentroidModule::new(
-        &device,
-        color_space,
-        image.dimensions,
-        k,
-        &work_texture,
-        &centroids_buffer,
-        &color_index_texture,
-        &find_centroid_module,
     );
     let mix_colors_module = MixColorsModule::new(
         &device,
@@ -1089,20 +1072,6 @@ pub async fn mix(
     }
     queue.submit(Some(encoder.finish()));
 
-    plus_plus_init_module.compute(&device, &queue);
-
-    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
-    {
-        let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-            label: Some("Init pass"),
-        });
-        find_centroid_module.dispatch(&mut compute_pass);
-    }
-
-    queue.submit(Some(encoder.finish()));
-
-    choose_centroid_module.compute(&device, &queue);
-
     let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
     {
         let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
@@ -1133,7 +1102,7 @@ pub async fn mix(
             let ts_data_raw = &*query_slice.get_mapped_range();
             let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
             println!(
-                "Compute shader elapsed: {:?}ms",
+                "Compute shader elapsed: {:?}ms [mix]",
                 (ts_data[1] - ts_data[0]) as f64 * ts_period as f64 * 1e-6
             );
         }
