@@ -5,14 +5,16 @@ use modules::{
 };
 use palette::{IntoColor, Lab, Pixel, Srgb, Srgba};
 use std::{fmt::Display, ops::Deref, str::FromStr, sync::mpsc::channel, vec};
-use utils::padded_bytes_per_row;
+use utils::{compute_work_group_count, padded_bytes_per_row};
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
-    Backends, BindGroupLayoutEntry, BindingType, Buffer, BufferBindingType, BufferUsages,
-    CommandEncoder, CommandEncoderDescriptor, ComputePassDescriptor, Device, DeviceDescriptor,
-    Features, ImageDataLayout, Instance, MapMode, PowerPreference, QuerySetDescriptor, QueryType,
-    Queue, RequestAdapterOptionsBase, ShaderStages, StorageTextureAccess, Texture,
-    TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureViewDimension,
+    AddressMode, Backends, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutEntry,
+    BindingResource, BindingType, Buffer, BufferBindingType, BufferUsages, CommandEncoder,
+    CommandEncoderDescriptor, ComputePassDescriptor, ComputePipelineDescriptor, Device,
+    DeviceDescriptor, Features, FilterMode, ImageDataLayout, Instance, MapMode, PowerPreference,
+    QuerySetDescriptor, QueryType, Queue, RequestAdapterOptionsBase, ShaderSource, ShaderStages,
+    StorageTextureAccess, Texture, TextureDescriptor, TextureDimension, TextureFormat,
+    TextureSampleType, TextureUsages, TextureViewDescriptor, TextureViewDimension,
 };
 
 pub mod debug;
@@ -133,7 +135,10 @@ impl Display for MixMode {
     }
 }
 
-struct InputTexture(Texture);
+struct InputTexture {
+    texture: Texture,
+    dimensions: (u32, u32),
+}
 
 impl InputTexture {
     fn new(device: &Device, queue: &Queue, image: &Image) -> Self {
@@ -165,7 +170,121 @@ impl InputTexture {
             texture_size,
         );
 
-        Self(texture)
+        Self {
+            texture,
+            dimensions: image.dimensions,
+        }
+    }
+
+    fn adjusted(self, device: &Device, queue: &Queue) -> Self {
+        let (width, height) = self.dimensions;
+        if width > 1024 || height > 1024 {
+            // Need resize.
+            let new_width;
+            let new_height;
+            if width > height {
+                new_width = 1024;
+                new_height = ((height as f32 * 1024.0 / width as f32) as u32).max(1);
+            } else {
+                new_height = 1024;
+                new_width = ((width as f32 * 1024.0 / height as f32) as u32).max(1);
+            }
+
+            let texture_size = wgpu::Extent3d {
+                width: new_width,
+                height: new_height,
+                depth_or_array_layers: 1,
+            };
+
+            let updated_texture = device.create_texture(&TextureDescriptor {
+                label: None,
+                size: texture_size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba8Unorm,
+                usage: TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::COPY_SRC
+                    | TextureUsages::STORAGE_BINDING,
+            });
+
+            let resize_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Resize shader"),
+                source: ShaderSource::Wgsl(include_str!("shaders/resize.wgsl").into()),
+            });
+
+            let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+                label: Some("Resize pipeline"),
+                layout: None,
+                module: &resize_shader,
+                entry_point: "main",
+            });
+
+            let filter_mode = FilterMode::Linear;
+
+            let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+                label: None,
+                address_mode_u: AddressMode::ClampToEdge,
+                address_mode_v: AddressMode::ClampToEdge,
+                address_mode_w: AddressMode::ClampToEdge,
+                mag_filter: filter_mode,
+                min_filter: filter_mode,
+                mipmap_filter: filter_mode,
+                ..Default::default()
+            });
+
+            let compute_constants = device.create_bind_group(&BindGroupDescriptor {
+                label: Some("Compute constants"),
+                layout: &pipeline.get_bind_group_layout(0),
+                entries: &[BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::Sampler(&sampler),
+                }],
+            });
+
+            let texture_bind_group = device.create_bind_group(&BindGroupDescriptor {
+                label: Some("Texture bind group"),
+                layout: &pipeline.get_bind_group_layout(1),
+                entries: &[
+                    BindGroupEntry {
+                        binding: 0,
+                        resource: BindingResource::TextureView(
+                            &self.texture.create_view(&TextureViewDescriptor::default()),
+                        ),
+                    },
+                    BindGroupEntry {
+                        binding: 1,
+                        resource: BindingResource::TextureView(
+                            &updated_texture.create_view(&TextureViewDescriptor::default()),
+                        ),
+                    },
+                ],
+            });
+
+            let mut encoder =
+                device.create_command_encoder(&CommandEncoderDescriptor { label: None });
+
+            {
+                let (dispatch_with, dispatch_height) =
+                    compute_work_group_count((texture_size.width, texture_size.height), (16, 16));
+                let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                    label: Some("Resize pass"),
+                });
+                compute_pass.set_pipeline(&pipeline);
+                compute_pass.set_bind_group(0, &compute_constants, &[]);
+                compute_pass.set_bind_group(1, &texture_bind_group, &[]);
+                compute_pass.dispatch_workgroups(dispatch_with, dispatch_height, 1);
+            }
+
+            queue.submit(Some(encoder.finish()));
+
+            Self {
+                texture: updated_texture,
+                dimensions: (new_width, new_height),
+            }
+        } else {
+            self
+        }
     }
 }
 
@@ -173,13 +292,33 @@ impl Deref for InputTexture {
     type Target = Texture;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.texture
     }
 }
 
 struct WorkTexture(Texture);
 
 impl WorkTexture {
+    fn with_dimensions(device: &Device, dimensions: (u32, u32)) -> Self {
+        let (width, height) = dimensions;
+        let texture_size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("work texture"),
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba32Float,
+            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+        });
+
+        Self(texture)
+    }
+
     fn new(device: &Device, image: &Image) -> Self {
         let (width, height) = image.dimensions;
         let texture_size = wgpu::Extent3d {
@@ -238,6 +377,26 @@ impl Deref for WorkTexture {
 struct ColorIndexTexture(Texture);
 
 impl ColorIndexTexture {
+    fn with_dimensions(device: &Device, dimensions: (u32, u32)) -> Self {
+        let (width, height) = dimensions;
+        let texture_size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Color index texture"),
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::R32Uint,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
+        });
+
+        Self(texture)
+    }
+
     fn new(device: &Device, image: &Image) -> Self {
         let (width, height) = image.dimensions;
         let texture_size = wgpu::Extent3d {
@@ -559,154 +718,9 @@ impl Deref for CentroidsBuffer {
 }
 
 pub async fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> {
-    let instance = Instance::new(Backends::all());
-    let adapter = instance
-        .request_adapter(&RequestAdapterOptionsBase {
-            power_preference: PowerPreference::HighPerformance,
-            force_fallback_adapter: false,
-            compatible_surface: None,
-        })
-        .await
-        .ok_or_else(|| anyhow::anyhow!("Couldn't create the adapter"))?;
+    let colors = palette(k, image, color_space).await?;
 
-    let features = adapter.features();
-    let (device, queue) = adapter
-        .request_device(
-            &DeviceDescriptor {
-                label: None,
-                features: features & (Features::TIMESTAMP_QUERY),
-                limits: Default::default(),
-            },
-            None,
-        )
-        .await?;
-
-    let centroids_buffer = CentroidsBuffer::empty_centroids(k, &device);
-
-    let query_set = if features.contains(Features::TIMESTAMP_QUERY) {
-        Some(device.create_query_set(&QuerySetDescriptor {
-            count: 2,
-            ty: QueryType::Timestamp,
-            label: None,
-        }))
-    } else {
-        None
-    };
-    let query_buf = device.create_buffer_init(&BufferInitDescriptor {
-        label: None,
-        contents: &[0; 16],
-        usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
-    });
-
-    let input_texture = InputTexture::new(&device, &queue, image);
-    let work_texture = WorkTexture::new(&device, image);
-    let color_index_texture = ColorIndexTexture::new(&device, image);
-    let output_texture = OutputTexture::new(&device, image);
-
-    let plus_plus_init_module =
-        PlusPlusInitModule::new(image.dimensions, k, &work_texture, &centroids_buffer);
-    let color_converter_module = ColorConverterModule::new(
-        &device,
-        color_space,
-        image.dimensions,
-        &input_texture,
-        &work_texture,
-    );
-    let color_reverter_module = ColorReverterModule::new(
-        &device,
-        color_space,
-        image.dimensions,
-        &work_texture,
-        &output_texture,
-    );
-    let find_centroid_module = FindCentroidModule::new(
-        &device,
-        image.dimensions,
-        &work_texture,
-        &centroids_buffer,
-        &color_index_texture,
-    );
-    let choose_centroid_module = ChooseCentroidModule::new(
-        &device,
-        color_space,
-        image.dimensions,
-        k,
-        &work_texture,
-        &centroids_buffer,
-        &color_index_texture,
-        &find_centroid_module,
-    );
-    let swap_module = SwapModule::new(
-        &device,
-        image.dimensions,
-        &work_texture,
-        &centroids_buffer,
-        &color_index_texture,
-    );
-
-    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
-    if let Some(query_set) = &query_set {
-        encoder.write_timestamp(query_set, 0);
-    }
-
-    {
-        let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-            label: Some("Init pass"),
-        });
-        color_converter_module.dispatch(&mut compute_pass);
-    }
-    queue.submit(Some(encoder.finish()));
-
-    plus_plus_init_module.compute(&device, &queue);
-
-    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
-    {
-        let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-            label: Some("Init pass"),
-        });
-        find_centroid_module.dispatch(&mut compute_pass);
-    }
-
-    queue.submit(Some(encoder.finish()));
-
-    choose_centroid_module.compute(&device, &queue);
-
-    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
-    {
-        let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-            label: Some("Swap and fetch result pass"),
-        });
-        swap_module.dispatch(&mut compute_pass);
-        color_reverter_module.dispatch(&mut compute_pass);
-    }
-
-    if let Some(query_set) = &query_set {
-        encoder.write_timestamp(query_set, 1);
-        encoder.resolve_query_set(query_set, 0..2, &query_buf, 0);
-    }
-    queue.submit(Some(encoder.finish()));
-
-    let query_slice = query_buf.slice(..);
-    let (query_sender, query_receiver) = channel();
-    query_slice.map_async(MapMode::Read, move |v| {
-        query_sender.send(v).expect("Couldn't send result");
-    });
-
-    device.poll(wgpu::Maintain::Wait);
-
-    if features.contains(Features::TIMESTAMP_QUERY) {
-        if let Ok(Ok(())) = query_receiver.recv() {
-            let ts_period = queue.get_timestamp_period();
-            let ts_data_raw = &*query_slice.get_mapped_range();
-            let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
-            println!(
-                "Compute shader elapsed: {:?}ms",
-                (ts_data[1] - ts_data[0]) as f64 * ts_period as f64 * 1e-6
-            );
-        }
-    }
-
-    output_texture.pull_image(image.dimensions, &device, &queue)
+    find(image, &colors, color_space).await
 }
 
 pub async fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u8; 4]>> {
@@ -749,21 +763,25 @@ pub async fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<
         usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
     });
 
-    let input_texture = InputTexture::new(&device, &queue, image);
-    let work_texture = WorkTexture::new(&device, image);
-    let color_index_texture = ColorIndexTexture::new(&device, image);
-    let plus_plus_init_module =
-        PlusPlusInitModule::new(image.dimensions, k, &work_texture, &centroids_buffer);
+    let input_texture = InputTexture::new(&device, &queue, image).adjusted(&device, &queue);
+    let work_texture = WorkTexture::with_dimensions(&device, input_texture.dimensions);
+    let color_index_texture = ColorIndexTexture::with_dimensions(&device, input_texture.dimensions);
+    let plus_plus_init_module = PlusPlusInitModule::new(
+        input_texture.dimensions,
+        k,
+        &work_texture,
+        &centroids_buffer,
+    );
     let color_converter_module = ColorConverterModule::new(
         &device,
         color_space,
-        image.dimensions,
+        input_texture.dimensions,
         &input_texture,
         &work_texture,
     );
     let find_centroid_module = FindCentroidModule::new(
         &device,
-        image.dimensions,
+        input_texture.dimensions,
         &work_texture,
         &centroids_buffer,
         &color_index_texture,
@@ -771,7 +789,7 @@ pub async fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<
     let choose_centroid_module = ChooseCentroidModule::new(
         &device,
         color_space,
-        image.dimensions,
+        input_texture.dimensions,
         k,
         &work_texture,
         &centroids_buffer,
