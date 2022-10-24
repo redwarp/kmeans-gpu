@@ -1,8 +1,4 @@
 use anyhow::{anyhow, Result};
-use modules::{
-    ChooseCentroidModule, ColorConverterModule, ColorReverterModule, FindCentroidModule,
-    MixColorsModule, Module, PlusPlusInitModule, SwapModule,
-};
 use palette::{IntoColor, Lab, Pixel, Srgb, Srgba};
 use std::{fmt::Display, ops::Deref, str::FromStr, sync::mpsc::channel, vec};
 use utils::{compute_work_group_count, padded_bytes_per_row};
@@ -11,14 +7,14 @@ use wgpu::{
     AddressMode, Backends, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutEntry,
     BindingResource, BindingType, Buffer, BufferBindingType, BufferUsages, CommandEncoder,
     CommandEncoderDescriptor, ComputePassDescriptor, ComputePipelineDescriptor, Device,
-    DeviceDescriptor, Features, FilterMode, ImageDataLayout, Instance, MapMode, PowerPreference,
-    QuerySetDescriptor, QueryType, Queue, RequestAdapterOptionsBase, ShaderSource, ShaderStages,
+    DeviceDescriptor, Extent3d, Features, FilterMode, ImageDataLayout, Instance, MapMode,
+    PowerPreference, Queue, RequestAdapterOptionsBase, ShaderSource, ShaderStages,
     StorageTextureAccess, Texture, TextureDescriptor, TextureDimension, TextureFormat,
     TextureSampleType, TextureUsages, TextureViewDescriptor, TextureViewDimension,
 };
 
-pub mod debug;
 mod modules;
+mod operations;
 mod utils;
 
 pub struct Image {
@@ -176,7 +172,7 @@ impl InputTexture {
         }
     }
 
-    fn adjusted(self, device: &Device, queue: &Queue) -> Self {
+    fn shrunk(&self, device: &Device, queue: &Queue) -> Option<InputTexture> {
         let (width, height) = self.dimensions;
         if width > 1024 || height > 1024 {
             // Need resize.
@@ -278,12 +274,12 @@ impl InputTexture {
 
             queue.submit(Some(encoder.finish()));
 
-            Self {
+            Some(Self {
                 texture: updated_texture,
                 dimensions: (new_width, new_height),
-            }
+            })
         } else {
-            self
+            None
         }
     }
 }
@@ -299,28 +295,8 @@ impl Deref for InputTexture {
 struct WorkTexture(Texture);
 
 impl WorkTexture {
-    fn with_dimensions(device: &Device, dimensions: (u32, u32)) -> Self {
+    fn new(device: &Device, dimensions: (u32, u32)) -> Self {
         let (width, height) = dimensions;
-        let texture_size = wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        };
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("work texture"),
-            size: texture_size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba32Float,
-            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-        });
-
-        Self(texture)
-    }
-
-    fn new(device: &Device, image: &Image) -> Self {
-        let (width, height) = image.dimensions;
         let texture_size = wgpu::Extent3d {
             width,
             height,
@@ -377,28 +353,8 @@ impl Deref for WorkTexture {
 struct ColorIndexTexture(Texture);
 
 impl ColorIndexTexture {
-    fn with_dimensions(device: &Device, dimensions: (u32, u32)) -> Self {
+    fn new(device: &Device, dimensions: (u32, u32)) -> Self {
         let (width, height) = dimensions;
-        let texture_size = wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        };
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Color index texture"),
-            size: texture_size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::R32Uint,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
-        });
-
-        Self(texture)
-    }
-
-    fn new(device: &Device, image: &Image) -> Self {
-        let (width, height) = image.dimensions;
         let texture_size = wgpu::Extent3d {
             width,
             height,
@@ -445,8 +401,8 @@ struct OutputTexture {
 }
 
 impl OutputTexture {
-    fn new(device: &Device, image: &Image) -> Self {
-        let (width, height) = image.dimensions;
+    fn new(device: &Device, dimensions: (u32, u32)) -> Self {
+        let (width, height) = dimensions;
         let texture_size = wgpu::Extent3d {
             width,
             height,
@@ -511,12 +467,12 @@ impl OutputTexture {
         }
     }
 
-    fn pull_image(
-        &self,
-        (width, height): (u32, u32),
-        device: &Device,
-        queue: &Queue,
-    ) -> Result<Image> {
+    fn pull_image(&self, device: &Device, queue: &Queue) -> Result<Image> {
+        let Extent3d {
+            width,
+            height,
+            depth_or_array_layers: _,
+        } = self.texture_size;
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
 
         let output_buffer = self.output_buffer(device, &mut encoder);
@@ -718,9 +674,42 @@ impl Deref for CentroidsBuffer {
 }
 
 pub async fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> {
-    let colors = palette(k, image, color_space).await?;
+    let instance = Instance::new(Backends::all());
+    let adapter = instance
+        .request_adapter(&RequestAdapterOptionsBase {
+            power_preference: PowerPreference::HighPerformance,
+            force_fallback_adapter: false,
+            compatible_surface: None,
+        })
+        .await
+        .ok_or_else(|| anyhow::anyhow!("Couldn't create the adapter"))?;
 
-    find(image, &colors, color_space).await
+    let features = adapter.features();
+    let (device, queue) = adapter
+        .request_device(
+            &DeviceDescriptor {
+                label: None,
+                features: features & (Features::TIMESTAMP_QUERY),
+                limits: Default::default(),
+            },
+            None,
+        )
+        .await?;
+    let query_time = features.contains(Features::TIMESTAMP_QUERY);
+
+    let input_texture = InputTexture::new(&device, &queue, image);
+
+    let centroids_buffer =
+        operations::extract_palette(&device, &queue, &input_texture, color_space, k, query_time)?;
+    operations::find_colors(
+        &device,
+        &queue,
+        &input_texture,
+        color_space,
+        &centroids_buffer,
+        query_time,
+    )?
+    .pull_image(&device, &queue)
 }
 
 pub async fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u8; 4]>> {
@@ -745,115 +734,14 @@ pub async fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<
             None,
         )
         .await?;
+    let query_time = features.contains(Features::TIMESTAMP_QUERY);
 
-    let centroids_buffer = CentroidsBuffer::empty_centroids(k, &device);
+    let input_texture = InputTexture::new(&device, &queue, image);
 
-    let query_set = if features.contains(Features::TIMESTAMP_QUERY) {
-        Some(device.create_query_set(&QuerySetDescriptor {
-            count: 2,
-            ty: QueryType::Timestamp,
-            label: None,
-        }))
-    } else {
-        None
-    };
-    let query_buf = device.create_buffer_init(&BufferInitDescriptor {
-        label: None,
-        contents: &[0; 16],
-        usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
-    });
+    let mut colors =
+        operations::extract_palette(&device, &queue, &input_texture, color_space, k, query_time)?
+            .pull_values(&device, &queue, color_space)?;
 
-    let input_texture = InputTexture::new(&device, &queue, image).adjusted(&device, &queue);
-    let work_texture = WorkTexture::with_dimensions(&device, input_texture.dimensions);
-    let color_index_texture = ColorIndexTexture::with_dimensions(&device, input_texture.dimensions);
-    let plus_plus_init_module = PlusPlusInitModule::new(
-        input_texture.dimensions,
-        k,
-        &work_texture,
-        &centroids_buffer,
-    );
-    let color_converter_module = ColorConverterModule::new(
-        &device,
-        color_space,
-        input_texture.dimensions,
-        &input_texture,
-        &work_texture,
-    );
-    let find_centroid_module = FindCentroidModule::new(
-        &device,
-        input_texture.dimensions,
-        &work_texture,
-        &centroids_buffer,
-        &color_index_texture,
-    );
-    let choose_centroid_module = ChooseCentroidModule::new(
-        &device,
-        color_space,
-        input_texture.dimensions,
-        k,
-        &work_texture,
-        &centroids_buffer,
-        &color_index_texture,
-        &find_centroid_module,
-    );
-
-    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
-    if let Some(query_set) = &query_set {
-        encoder.write_timestamp(query_set, 0);
-    }
-
-    {
-        let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-            label: Some("Init pass"),
-        });
-        color_converter_module.dispatch(&mut compute_pass);
-    }
-    queue.submit(Some(encoder.finish()));
-
-    plus_plus_init_module.compute(&device, &queue);
-
-    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
-    {
-        let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-            label: Some("Init pass"),
-        });
-        find_centroid_module.dispatch(&mut compute_pass);
-    }
-
-    queue.submit(Some(encoder.finish()));
-
-    choose_centroid_module.compute(&device, &queue);
-
-    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
-    if let Some(query_set) = &query_set {
-        encoder.write_timestamp(query_set, 1);
-    }
-
-    if features.contains(Features::TIMESTAMP_QUERY) {
-        if let Some(query_set) = &query_set {
-            encoder.resolve_query_set(query_set, 0..2, &query_buf, 0);
-        }
-        queue.submit(Some(encoder.finish()));
-
-        let query_slice = query_buf.slice(..);
-        let (query_sender, query_receiver) = channel();
-        query_slice.map_async(MapMode::Read, move |v| {
-            query_sender.send(v).expect("Couldn't send result");
-        });
-
-        device.poll(wgpu::Maintain::Wait);
-        if let Ok(Ok(())) = query_receiver.recv() {
-            let ts_period = queue.get_timestamp_period();
-            let ts_data_raw = &*query_slice.get_mapped_range();
-            let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
-            println!(
-                "Compute shader elapsed: {:?}ms [palette]",
-                (ts_data[1] - ts_data[0]) as f64 * ts_period as f64 * 1e-6
-            );
-        }
-    }
-
-    let mut colors = centroids_buffer.pull_values(&device, &queue, color_space)?;
     colors.sort_unstable_by(|a, b| {
         let a: Lab = Srgba::from_raw(a).into_format::<_, f32>().into_color();
         let b: Lab = Srgba::from_raw(b).into_format::<_, f32>().into_color();
@@ -884,102 +772,20 @@ pub async fn find(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -
             None,
         )
         .await?;
-
-    let centroids = CentroidsBuffer::fixed_centroids(colors, color_space, &device);
-
-    let query_set = if features.contains(Features::TIMESTAMP_QUERY) {
-        Some(device.create_query_set(&QuerySetDescriptor {
-            count: 2,
-            ty: QueryType::Timestamp,
-            label: None,
-        }))
-    } else {
-        None
-    };
-    let query_buf = device.create_buffer_init(&BufferInitDescriptor {
-        label: None,
-        contents: &[0; 16],
-        usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
-    });
+    let query_time = features.contains(Features::TIMESTAMP_QUERY);
 
     let input_texture = InputTexture::new(&device, &queue, image);
-    let work_texture = WorkTexture::new(&device, image);
-    let color_index_texture = ColorIndexTexture::new(&device, image);
-    let output_texture = OutputTexture::new(&device, image);
+    let centroids_buffer = CentroidsBuffer::fixed_centroids(colors, color_space, &device);
 
-    let color_converter_module = ColorConverterModule::new(
+    operations::find_colors(
         &device,
-        color_space,
-        image.dimensions,
+        &queue,
         &input_texture,
-        &work_texture,
-    );
-    let color_reverter_module = ColorReverterModule::new(
-        &device,
         color_space,
-        image.dimensions,
-        &work_texture,
-        &output_texture,
-    );
-    let find_centroid_module = FindCentroidModule::new(
-        &device,
-        image.dimensions,
-        &work_texture,
-        &centroids,
-        &color_index_texture,
-    );
-
-    let swap_module = SwapModule::new(
-        &device,
-        image.dimensions,
-        &work_texture,
-        &centroids,
-        &color_index_texture,
-    );
-
-    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
-    if let Some(query_set) = &query_set {
-        encoder.write_timestamp(query_set, 0);
-    }
-
-    {
-        let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-            label: Some("Init pass"),
-        });
-        color_converter_module.dispatch(&mut compute_pass);
-        find_centroid_module.dispatch(&mut compute_pass);
-        swap_module.dispatch(&mut compute_pass);
-        color_reverter_module.dispatch(&mut compute_pass);
-    }
-    if let Some(query_set) = &query_set {
-        encoder.write_timestamp(query_set, 1);
-    }
-
-    if let Some(query_set) = &query_set {
-        encoder.resolve_query_set(query_set, 0..2, &query_buf, 0);
-    }
-    queue.submit(Some(encoder.finish()));
-
-    let query_slice = query_buf.slice(..);
-    let (query_sender, query_receiver) = channel();
-    query_slice.map_async(MapMode::Read, move |v| {
-        query_sender.send(v).expect("Couldn't send result");
-    });
-
-    device.poll(wgpu::Maintain::Wait);
-    if features.contains(Features::TIMESTAMP_QUERY) {
-        if let Ok(Ok(())) = query_receiver.recv() {
-            let ts_period = queue.get_timestamp_period();
-            let ts_data_raw = &*query_slice.get_mapped_range();
-            let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
-            println!(
-                "Compute shader elapsed: {:?}ms [find]",
-                (ts_data[1] - ts_data[0]) as f64 * ts_period as f64 * 1e-6
-            );
-        }
-    }
-
-    output_texture.pull_image(image.dimensions, &device, &queue)
+        &centroids_buffer,
+        query_time,
+    )?
+    .pull_image(&device, &queue)
 }
 
 pub async fn mix(
@@ -988,8 +794,6 @@ pub async fn mix(
     color_space: &ColorSpace,
     mix_mode: &MixMode,
 ) -> Result<Image> {
-    let colors = palette(k, image, color_space).await?;
-
     let instance = Instance::new(Backends::all());
     let adapter = instance
         .request_adapter(&RequestAdapterOptionsBase {
@@ -1011,102 +815,21 @@ pub async fn mix(
             None,
         )
         .await?;
-
-    let centroids_buffer = CentroidsBuffer::fixed_centroids(&colors, color_space, &device);
-
-    let query_set = if features.contains(Features::TIMESTAMP_QUERY) {
-        Some(device.create_query_set(&QuerySetDescriptor {
-            count: 2,
-            ty: QueryType::Timestamp,
-            label: None,
-        }))
-    } else {
-        None
-    };
-    let query_buf = device.create_buffer_init(&BufferInitDescriptor {
-        label: None,
-        contents: &[0; 16],
-        usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
-    });
+    let query_time = features.contains(Features::TIMESTAMP_QUERY);
 
     let input_texture = InputTexture::new(&device, &queue, image);
-    let work_texture = WorkTexture::new(&device, image);
-    let dithered_texture = WorkTexture::new(&device, image);
-    let color_index_texture = ColorIndexTexture::new(&device, image);
-    let output_texture = OutputTexture::new(&device, image);
 
-    let color_converter_module = ColorConverterModule::new(
+    let centroids_buffer =
+        operations::extract_palette(&device, &queue, &input_texture, color_space, k, query_time)?;
+
+    operations::mix_colors(
         &device,
-        color_space,
-        image.dimensions,
+        &queue,
         &input_texture,
-        &work_texture,
-    );
-    let mix_colors_module = MixColorsModule::new(
-        &device,
-        image.dimensions,
-        &work_texture,
-        &dithered_texture,
-        &color_index_texture,
-        &centroids_buffer,
-        mix_mode,
-    );
-    let color_reverter_module = ColorReverterModule::new(
-        &device,
         color_space,
-        image.dimensions,
-        &dithered_texture,
-        &output_texture,
-    );
-
-    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
-    if let Some(query_set) = &query_set {
-        encoder.write_timestamp(query_set, 0);
-    }
-
-    {
-        let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-            label: Some("Init pass"),
-        });
-        color_converter_module.dispatch(&mut compute_pass);
-    }
-    queue.submit(Some(encoder.finish()));
-
-    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
-    {
-        let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-            label: Some("Swap and fetch result pass"),
-        });
-        mix_colors_module.dispatch(&mut compute_pass);
-        color_reverter_module.dispatch(&mut compute_pass);
-    }
-    if let Some(query_set) = &query_set {
-        encoder.write_timestamp(query_set, 1);
-    }
-
-    if let Some(query_set) = &query_set {
-        encoder.resolve_query_set(query_set, 0..2, &query_buf, 0);
-    }
-    queue.submit(Some(encoder.finish()));
-
-    let query_slice = query_buf.slice(..);
-    let (query_sender, query_receiver) = channel();
-    query_slice.map_async(MapMode::Read, move |v| {
-        query_sender.send(v).expect("Couldn't send result");
-    });
-
-    device.poll(wgpu::Maintain::Wait);
-    if features.contains(Features::TIMESTAMP_QUERY) {
-        if let Ok(Ok(())) = query_receiver.recv() {
-            let ts_period = queue.get_timestamp_period();
-            let ts_data_raw = &*query_slice.get_mapped_range();
-            let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
-            println!(
-                "Compute shader elapsed: {:?}ms [mix]",
-                (ts_data[1] - ts_data[0]) as f64 * ts_period as f64 * 1e-6
-            );
-        }
-    }
-
-    output_texture.pull_image(image.dimensions, &device, &queue)
+        mix_mode,
+        &centroids_buffer,
+        query_time,
+    )?
+    .pull_image(&device, &queue)
 }

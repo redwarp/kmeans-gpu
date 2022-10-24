@@ -87,14 +87,6 @@ pub enum Commands {
         #[clap(value_enum, short, long="mixmode", default_value_t=MixMode::Dither)]
         mix_mode: MixMode,
     },
-    Debug {
-        /// K value, aka the number of colors we want to extract
-        #[clap(short, value_parser = validate_k)]
-        k: u32,
-        /// Input file
-        #[clap(short, long, value_parser = validate_filenames)]
-        input: PathBuf,
-    },
 }
 
 #[derive(Debug, Clone)]
