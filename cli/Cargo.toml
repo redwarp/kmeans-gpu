@@ -19,5 +19,6 @@ pollster = "0.2"
 clap = { version = "4.0", features = ["cargo", "derive"] }
 log = "0.4"
 env_logger = "0.9"
-regex = "1.5"
+regex = "1.6"
 k-means-gpu = { path = "../core" }
+bytemuck = "1.12"

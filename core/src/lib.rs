@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use image::{copied_pixel, Container, Image};
 use palette::{IntoColor, Lab, Pixel, Srgb, Srgba};
 use std::{fmt::Display, ops::Deref, str::FromStr, sync::mpsc::channel, vec};
 use utils::{compute_work_group_count, padded_bytes_per_row};
@@ -17,36 +18,67 @@ mod modules;
 mod operations;
 mod utils;
 
-pub struct Image {
-    pub(crate) dimensions: (u32, u32),
-    pub(crate) rgba: Vec<[u8; 4]>,
-}
+pub mod image {
+    use std::ops::Deref;
 
-impl Image {
-    pub fn new(dimensions: (u32, u32), rgba: Vec<[u8; 4]>) -> Self {
-        Self { dimensions, rgba }
+    pub trait Container: Deref<Target = [[u8; 4]]> + Sized {
+        fn to_pixel_vec(self) -> Vec<u8> {
+            bytemuck::cast_slice::<_, u8>(&self).to_vec()
+        }
     }
 
-    pub fn from_raw_pixels(dimensions: (u32, u32), rbga: &[u8]) -> Self {
+    impl Container for Vec<[u8; 4]> {
+        fn to_pixel_vec(self) -> Vec<u8> {
+            bytemuck::cast_vec(self)
+        }
+    }
+
+    impl Container for &[[u8; 4]] {}
+
+    pub struct Image<C>
+    where
+        C: Container,
+    {
+        pub(crate) dimensions: (u32, u32),
+        pub(crate) rgba: C,
+    }
+
+    impl<C> Image<C>
+    where
+        C: Container,
+    {
+        pub fn new(dimensions: (u32, u32), rgba: C) -> Self {
+            Self { dimensions, rgba }
+        }
+
+        pub fn get_pixel(&self, x: u32, y: u32) -> &[u8; 4] {
+            let index = (x + y * self.dimensions.0) as usize;
+            &self.rgba[index]
+        }
+
+        pub fn dimensions(&self) -> (u32, u32) {
+            self.dimensions
+        }
+
+        pub fn into_raw_pixels(self) -> Vec<u8> {
+            self.rgba.to_pixel_vec()
+        }
+    }
+
+    pub fn copied_pixel(dimensions: (u32, u32), rbga: &[u8]) -> Image<Vec<[u8; 4]>> {
         let mut pixels = Vec::with_capacity(dimensions.0 as usize * dimensions.1 as usize);
         pixels.extend_from_slice(bytemuck::cast_slice(rbga));
-        Self {
+        Image {
             dimensions,
             rgba: pixels,
         }
     }
 
-    pub fn get_pixel(&self, x: u32, y: u32) -> &[u8; 4] {
-        let index = (x + y * self.dimensions.0) as usize;
-        &self.rgba[index]
-    }
-
-    pub fn dimensions(&self) -> (u32, u32) {
-        self.dimensions
-    }
-
-    pub fn into_raw_pixels(self) -> Vec<u8> {
-        self.rgba.into_iter().flatten().collect()
+    pub fn borrowed_pixel(dimensions: (u32, u32), rbga: &[u8]) -> Image<&[[u8; 4]]> {
+        Image {
+            dimensions,
+            rgba: bytemuck::cast_slice(rbga),
+        }
     }
 }
 
@@ -137,7 +169,7 @@ struct InputTexture {
 }
 
 impl InputTexture {
-    fn new(device: &Device, queue: &Queue, image: &Image) -> Self {
+    fn new<C: Container>(device: &Device, queue: &Queue, image: &Image<C>) -> Self {
         let (width, height) = image.dimensions;
         let texture_size = wgpu::Extent3d {
             width,
@@ -467,7 +499,7 @@ impl OutputTexture {
         }
     }
 
-    fn pull_image(&self, device: &Device, queue: &Queue) -> Result<Image> {
+    fn pull_image(&self, device: &Device, queue: &Queue) -> Result<Image<Vec<[u8; 4]>>> {
         let Extent3d {
             width,
             height,
@@ -499,7 +531,7 @@ impl OutputTexture {
                     pixels.copy_from_slice(&padded[..output_buffer.unpadded_bytes_per_row]);
                 }
 
-                let result = Image::from_raw_pixels((width, height), &pixels);
+                let result = copied_pixel((width, height), &pixels);
 
                 Ok(result)
             }
@@ -673,7 +705,11 @@ impl Deref for CentroidsBuffer {
     }
 }
 
-pub async fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Image> {
+pub async fn kmeans<C: Container>(
+    k: u32,
+    image: &Image<C>,
+    color_space: &ColorSpace,
+) -> Result<Image<Vec<[u8; 4]>>> {
     let instance = Instance::new(Backends::all());
     let adapter = instance
         .request_adapter(&RequestAdapterOptionsBase {
@@ -712,7 +748,11 @@ pub async fn kmeans(k: u32, image: &Image, color_space: &ColorSpace) -> Result<I
     .pull_image(&device, &queue)
 }
 
-pub async fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<Vec<[u8; 4]>> {
+pub async fn palette<C: Container>(
+    k: u32,
+    image: &Image<C>,
+    color_space: &ColorSpace,
+) -> Result<Vec<[u8; 4]>> {
     let instance = Instance::new(Backends::all());
     let adapter = instance
         .request_adapter(&RequestAdapterOptionsBase {
@@ -750,7 +790,11 @@ pub async fn palette(k: u32, image: &Image, color_space: &ColorSpace) -> Result<
     Ok(colors)
 }
 
-pub async fn find(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -> Result<Image> {
+pub async fn find<C: Container>(
+    image: &Image<C>,
+    colors: &[[u8; 4]],
+    color_space: &ColorSpace,
+) -> Result<Image<Vec<[u8; 4]>>> {
     let instance = Instance::new(Backends::all());
     let adapter = instance
         .request_adapter(&RequestAdapterOptionsBase {
@@ -788,12 +832,12 @@ pub async fn find(image: &Image, colors: &[[u8; 4]], color_space: &ColorSpace) -
     .pull_image(&device, &queue)
 }
 
-pub async fn mix(
+pub async fn mix<C: Container>(
     k: u32,
-    image: &Image,
+    image: &Image<C>,
     color_space: &ColorSpace,
     mix_mode: &MixMode,
-) -> Result<Image> {
+) -> Result<Image<Vec<[u8; 4]>>> {
     let instance = Instance::new(Backends::all());
     let adapter = instance
         .request_adapter(&RequestAdapterOptionsBase {

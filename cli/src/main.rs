@@ -7,8 +7,8 @@ use std::{
 use anyhow::{Ok, Result};
 use args::{Cli, Commands, Extension};
 use clap::Parser;
-use image::{ImageBuffer, Rgba};
-use k_means_gpu::{find, kmeans, mix, palette, ColorSpace, Image, MixMode};
+use image::{ImageBuffer, Rgba, RgbaImage};
+use k_means_gpu::{find, image::Image, kmeans, mix, palette, ColorSpace, MixMode};
 use pollster::FutureExt;
 
 mod args;
@@ -66,7 +66,8 @@ async fn kmeans_subcommand(
     extension: Option<Extension>,
     color_space: ColorSpace,
 ) -> Result<()> {
-    let image = Image::open(&input)?;
+    let image = image::open(&input)?.to_rgba8();
+    let image = to_lib_image(&image);
 
     let result = kmeans(k, &image, &color_space).await?;
     let (width, height) = result.dimensions();
@@ -87,7 +88,8 @@ async fn palette_subcommand(
     output: Option<PathBuf>,
     color_space: ColorSpace,
 ) -> Result<()> {
-    let image = Image::open(&input)?;
+    let image = image::open(&input)?.to_rgba8();
+    let image = to_lib_image(&image);
 
     let result = palette(k, &image, &color_space).await?;
 
@@ -113,7 +115,8 @@ async fn find_subcommand(
 ) -> Result<()> {
     let colors = parse_colors(&replacement)?;
 
-    let image = Image::open(&input)?;
+    let image = image::open(&input)?.to_rgba8();
+    let image = to_lib_image(&image);
 
     let result = find(&image, &colors, &color_space).await?;
 
@@ -137,7 +140,8 @@ async fn mix_subcommand(
     color_space: ColorSpace,
     mix_mode: MixMode,
 ) -> Result<()> {
-    let image = Image::open(&input)?;
+    let image = image::open(&input)?.to_rgba8();
+    let image = to_lib_image(&image);
 
     let result = mix(k, &image, &color_space, &mix_mode).await?;
     let (width, height) = result.dimensions();
@@ -272,25 +276,6 @@ fn find_file(
     }
 }
 
-trait Openable: Sized {
-    fn open<P>(path: P) -> Result<Self>
-    where
-        P: AsRef<Path>;
-}
-
-impl Openable for Image {
-    fn open<P>(path: P) -> Result<Self>
-    where
-        P: AsRef<Path>,
-    {
-        let image = image::open(path)?.to_rgba8();
-        let dimensions = image.dimensions();
-        let image = Image::from_raw_pixels(dimensions, &image.into_raw());
-
-        Ok(image)
-    }
-}
-
 fn save_palette<P>(path: P, palette: &[[u8; 4]]) -> Result<()>
 where
     P: AsRef<Path>,
@@ -344,4 +329,8 @@ mod tests {
         let expected: Vec<[u8; 4]> = vec![[255, 255, 255, 255], [0, 0, 0, 255]];
         assert_eq!(parsed, expected);
     }
+}
+
+fn to_lib_image(image: &RgbaImage) -> Image<&[[u8; 4]]> {
+    Image::new(image.dimensions(), bytemuck::cast_slice(image.as_raw()))
 }
