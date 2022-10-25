@@ -18,70 +18,9 @@ mod modules;
 mod operations;
 mod utils;
 
-pub mod image {
-    use std::ops::Deref;
+const MAX_IMAGE_DIMENSION: u32 = 512;
 
-    pub trait Container: Deref<Target = [[u8; 4]]> + Sized {
-        fn to_pixel_vec(self) -> Vec<u8> {
-            bytemuck::cast_slice::<_, u8>(&self).to_vec()
-        }
-    }
-
-    impl Container for Vec<[u8; 4]> {
-        fn to_pixel_vec(self) -> Vec<u8> {
-            bytemuck::cast_vec(self)
-        }
-    }
-
-    impl Container for &[[u8; 4]] {}
-
-    pub struct Image<C>
-    where
-        C: Container,
-    {
-        pub(crate) dimensions: (u32, u32),
-        pub(crate) rgba: C,
-    }
-
-    impl<C> Image<C>
-    where
-        C: Container,
-    {
-        pub fn new(dimensions: (u32, u32), rgba: C) -> Self {
-            Self { dimensions, rgba }
-        }
-
-        pub fn get_pixel(&self, x: u32, y: u32) -> &[u8; 4] {
-            let index = (x + y * self.dimensions.0) as usize;
-            &self.rgba[index]
-        }
-
-        pub fn dimensions(&self) -> (u32, u32) {
-            self.dimensions
-        }
-
-        pub fn into_raw_pixels(self) -> Vec<u8> {
-            self.rgba.to_pixel_vec()
-        }
-    }
-
-    pub fn copied_pixel(dimensions: (u32, u32), rbga: &[u8]) -> Image<Vec<[u8; 4]>> {
-        let mut pixels = Vec::with_capacity(dimensions.0 as usize * dimensions.1 as usize);
-        pixels.extend_from_slice(bytemuck::cast_slice(rbga));
-        Image {
-            dimensions,
-            rgba: pixels,
-        }
-    }
-
-    pub fn borrowed_pixel(dimensions: (u32, u32), rbga: &[u8]) -> Image<&[[u8; 4]]> {
-        Image {
-            dimensions,
-            rgba: bytemuck::cast_slice(rbga),
-        }
-    }
-}
-
+pub mod image;
 #[derive(Clone, Copy)]
 pub enum ColorSpace {
     Lab,
@@ -206,16 +145,18 @@ impl InputTexture {
 
     fn shrunk(&self, device: &Device, queue: &Queue) -> Option<InputTexture> {
         let (width, height) = self.dimensions;
-        if width > 1024 || height > 1024 {
+        if width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION {
             // Need resize.
             let new_width;
             let new_height;
             if width > height {
-                new_width = 1024;
-                new_height = ((height as f32 * 1024.0 / width as f32) as u32).max(1);
+                new_width = MAX_IMAGE_DIMENSION;
+                new_height =
+                    ((height as f32 * MAX_IMAGE_DIMENSION as f32 / width as f32) as u32).max(1);
             } else {
-                new_height = 1024;
-                new_width = ((width as f32 * 1024.0 / height as f32) as u32).max(1);
+                new_height = MAX_IMAGE_DIMENSION;
+                new_width =
+                    ((width as f32 * MAX_IMAGE_DIMENSION as f32 / height as f32) as u32).max(1);
             }
 
             let texture_size = wgpu::Extent3d {
