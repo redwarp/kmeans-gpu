@@ -21,6 +21,46 @@ mod utils;
 const MAX_IMAGE_DIMENSION: u32 = 512;
 
 pub mod image;
+
+pub struct ImageProcessor {
+    device: Device,
+    queue: Queue,
+    query_time: bool,
+}
+
+impl ImageProcessor {
+    pub async fn new() -> Result<Self> {
+        let instance = Instance::new(Backends::all());
+        let adapter = instance
+            .request_adapter(&RequestAdapterOptionsBase {
+                power_preference: PowerPreference::HighPerformance,
+                force_fallback_adapter: false,
+                compatible_surface: None,
+            })
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Couldn't create the adapter"))?;
+
+        let features = adapter.features();
+        let (device, queue) = adapter
+            .request_device(
+                &DeviceDescriptor {
+                    label: None,
+                    features: features & (Features::TIMESTAMP_QUERY),
+                    limits: Default::default(),
+                },
+                None,
+            )
+            .await?;
+        let query_time = device.features().contains(Features::TIMESTAMP_QUERY);
+
+        Ok(Self {
+            device,
+            queue,
+            query_time,
+        })
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum ColorSpace {
     Lab,
@@ -646,82 +686,50 @@ impl Deref for CentroidsBuffer {
     }
 }
 
-pub async fn kmeans<C: Container>(
+pub fn kmeans<C: Container>(
+    image_processor: &ImageProcessor,
     k: u32,
     image: &Image<C>,
     color_space: &ColorSpace,
 ) -> Result<Image<Vec<[u8; 4]>>> {
-    let instance = Instance::new(Backends::all());
-    let adapter = instance
-        .request_adapter(&RequestAdapterOptionsBase {
-            power_preference: PowerPreference::HighPerformance,
-            force_fallback_adapter: false,
-            compatible_surface: None,
-        })
-        .await
-        .ok_or_else(|| anyhow::anyhow!("Couldn't create the adapter"))?;
+    let input_texture = InputTexture::new(&image_processor.device, &image_processor.queue, image);
 
-    let features = adapter.features();
-    let (device, queue) = adapter
-        .request_device(
-            &DeviceDescriptor {
-                label: None,
-                features: features & (Features::TIMESTAMP_QUERY),
-                limits: Default::default(),
-            },
-            None,
-        )
-        .await?;
-    let query_time = features.contains(Features::TIMESTAMP_QUERY);
-
-    let input_texture = InputTexture::new(&device, &queue, image);
-
-    let centroids_buffer =
-        operations::extract_palette(&device, &queue, &input_texture, color_space, k, query_time)?;
+    let centroids_buffer = operations::extract_palette(
+        &image_processor.device,
+        &image_processor.queue,
+        &input_texture,
+        color_space,
+        k,
+        image_processor.query_time,
+    )?;
     operations::find_colors(
-        &device,
-        &queue,
+        &image_processor.device,
+        &image_processor.queue,
         &input_texture,
         color_space,
         &centroids_buffer,
-        query_time,
+        image_processor.query_time,
     )?
-    .pull_image(&device, &queue)
+    .pull_image(&image_processor.device, &image_processor.queue)
 }
 
-pub async fn palette<C: Container>(
+pub fn palette<C: Container>(
+    image_processor: &ImageProcessor,
     k: u32,
     image: &Image<C>,
     color_space: &ColorSpace,
 ) -> Result<Vec<[u8; 4]>> {
-    let instance = Instance::new(Backends::all());
-    let adapter = instance
-        .request_adapter(&RequestAdapterOptionsBase {
-            power_preference: PowerPreference::HighPerformance,
-            force_fallback_adapter: false,
-            compatible_surface: None,
-        })
-        .await
-        .ok_or_else(|| anyhow::anyhow!("Couldn't create the adapter"))?;
+    let input_texture = InputTexture::new(&image_processor.device, &image_processor.queue, image);
 
-    let features = adapter.features();
-    let (device, queue) = adapter
-        .request_device(
-            &DeviceDescriptor {
-                label: None,
-                features: features & (Features::TIMESTAMP_QUERY),
-                limits: Default::default(),
-            },
-            None,
-        )
-        .await?;
-    let query_time = features.contains(Features::TIMESTAMP_QUERY);
-
-    let input_texture = InputTexture::new(&device, &queue, image);
-
-    let mut colors =
-        operations::extract_palette(&device, &queue, &input_texture, color_space, k, query_time)?
-            .pull_values(&device, &queue, color_space)?;
+    let mut colors = operations::extract_palette(
+        &image_processor.device,
+        &image_processor.queue,
+        &input_texture,
+        color_space,
+        k,
+        image_processor.query_time,
+    )?
+    .pull_values(&image_processor.device, &image_processor.queue, color_space)?;
 
     colors.sort_unstable_by(|a, b| {
         let a: Lab = Srgba::from_raw(a).into_format::<_, f32>().into_color();
@@ -731,90 +739,53 @@ pub async fn palette<C: Container>(
     Ok(colors)
 }
 
-pub async fn find<C: Container>(
+pub fn find<C: Container>(
+    image_processor: &ImageProcessor,
     image: &Image<C>,
     colors: &[[u8; 4]],
     color_space: &ColorSpace,
 ) -> Result<Image<Vec<[u8; 4]>>> {
-    let instance = Instance::new(Backends::all());
-    let adapter = instance
-        .request_adapter(&RequestAdapterOptionsBase {
-            power_preference: PowerPreference::HighPerformance,
-            force_fallback_adapter: false,
-            compatible_surface: None,
-        })
-        .await
-        .ok_or_else(|| anyhow::anyhow!("Couldn't create the adapter"))?;
-
-    let features = adapter.features();
-    let (device, queue) = adapter
-        .request_device(
-            &DeviceDescriptor {
-                label: None,
-                features: features & (Features::TIMESTAMP_QUERY),
-                limits: Default::default(),
-            },
-            None,
-        )
-        .await?;
-    let query_time = features.contains(Features::TIMESTAMP_QUERY);
-
-    let input_texture = InputTexture::new(&device, &queue, image);
-    let centroids_buffer = CentroidsBuffer::fixed_centroids(colors, color_space, &device);
+    let input_texture = InputTexture::new(&image_processor.device, &image_processor.queue, image);
+    let centroids_buffer =
+        CentroidsBuffer::fixed_centroids(colors, color_space, &image_processor.device);
 
     operations::find_colors(
-        &device,
-        &queue,
+        &image_processor.device,
+        &image_processor.queue,
         &input_texture,
         color_space,
         &centroids_buffer,
-        query_time,
+        image_processor.query_time,
     )?
-    .pull_image(&device, &queue)
+    .pull_image(&image_processor.device, &image_processor.queue)
 }
 
-pub async fn mix<C: Container>(
+pub fn mix<C: Container>(
+    image_processor: &ImageProcessor,
     k: u32,
     image: &Image<C>,
     color_space: &ColorSpace,
     mix_mode: &MixMode,
 ) -> Result<Image<Vec<[u8; 4]>>> {
-    let instance = Instance::new(Backends::all());
-    let adapter = instance
-        .request_adapter(&RequestAdapterOptionsBase {
-            power_preference: PowerPreference::HighPerformance,
-            force_fallback_adapter: false,
-            compatible_surface: None,
-        })
-        .await
-        .ok_or_else(|| anyhow::anyhow!("Couldn't create the adapter"))?;
+    let input_texture = InputTexture::new(&image_processor.device, &image_processor.queue, image);
 
-    let features = adapter.features();
-    let (device, queue) = adapter
-        .request_device(
-            &DeviceDescriptor {
-                label: None,
-                features: features & (Features::TIMESTAMP_QUERY),
-                limits: Default::default(),
-            },
-            None,
-        )
-        .await?;
-    let query_time = features.contains(Features::TIMESTAMP_QUERY);
-
-    let input_texture = InputTexture::new(&device, &queue, image);
-
-    let centroids_buffer =
-        operations::extract_palette(&device, &queue, &input_texture, color_space, k, query_time)?;
+    let centroids_buffer = operations::extract_palette(
+        &image_processor.device,
+        &image_processor.queue,
+        &input_texture,
+        color_space,
+        k,
+        image_processor.query_time,
+    )?;
 
     operations::mix_colors(
-        &device,
-        &queue,
+        &image_processor.device,
+        &image_processor.queue,
         &input_texture,
         color_space,
         mix_mode,
         &centroids_buffer,
-        query_time,
+        image_processor.query_time,
     )?
-    .pull_image(&device, &queue)
+    .pull_image(&image_processor.device, &image_processor.queue)
 }

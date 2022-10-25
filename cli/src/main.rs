@@ -8,7 +8,7 @@ use anyhow::{Ok, Result};
 use args::{Cli, Commands, Extension};
 use clap::Parser;
 use image::{ImageBuffer, Rgba, RgbaImage};
-use k_means_gpu::{find, image::Image, kmeans, mix, palette, ColorSpace, MixMode};
+use k_means_gpu::{find, image::Image, kmeans, mix, palette, ColorSpace, ImageProcessor, MixMode};
 use pollster::FutureExt;
 
 mod args;
@@ -69,7 +69,8 @@ async fn kmeans_subcommand(
     let image = image::open(&input)?.to_rgba8();
     let image = to_lib_image(&image);
 
-    let result = kmeans(k, &image, &color_space).await?;
+    let image_processor = ImageProcessor::new().await?;
+    let result = kmeans(&image_processor, k, &image, &color_space)?;
     let (width, height) = result.dimensions();
 
     if let Some(output_image) =
@@ -91,7 +92,8 @@ async fn palette_subcommand(
     let image = image::open(&input)?.to_rgba8();
     let image = to_lib_image(&image);
 
-    let result = palette(k, &image, &color_space).await?;
+    let image_processor = ImageProcessor::new().await?;
+    let result = palette(&image_processor, k, &image, &color_space)?;
 
     let path = palette_file(k, &input, &output, &color_space)?;
     save_palette(path, &result)?;
@@ -118,7 +120,8 @@ async fn find_subcommand(
     let image = image::open(&input)?.to_rgba8();
     let image = to_lib_image(&image);
 
-    let result = find(&image, &colors, &color_space).await?;
+    let image_processor = ImageProcessor::new().await?;
+    let result = find(&image_processor, &image, &colors, &color_space)?;
 
     let (width, height) = result.dimensions();
 
@@ -143,7 +146,8 @@ async fn mix_subcommand(
     let image = image::open(&input)?.to_rgba8();
     let image = to_lib_image(&image);
 
-    let result = mix(k, &image, &color_space, &mix_mode).await?;
+    let image_processor = ImageProcessor::new().await?;
+    let result = mix(&image_processor, k, &image, &color_space, &mix_mode)?;
     let (width, height) = result.dimensions();
 
     if let Some(output_image) =
