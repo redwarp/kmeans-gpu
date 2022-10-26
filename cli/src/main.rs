@@ -8,7 +8,7 @@ use anyhow::{Ok, Result};
 use args::{Cli, Commands, Extension};
 use clap::Parser;
 use image::{ImageBuffer, Rgba, RgbaImage};
-use k_means_gpu::{find, image::Image, kmeans, mix, palette, ColorSpace, ImageProcessor, MixMode};
+use k_means_gpu::{find, image::Image, palette, reduce, ImageProcessor, ReduceMode};
 use pollster::FutureExt;
 
 mod args;
@@ -19,83 +19,40 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.commands {
-        Commands::Kmeans {
-            k,
-            input,
-            output,
-            extension,
-            color_space,
-        } => kmeans_subcommand(k, input, output, extension, color_space.into()).block_on(),
         Commands::Palette {
-            k,
+            color_count,
             input,
             output,
-            color_space,
-        } => palette_subcommand(k, input, output, color_space.into()).block_on(),
+        } => palette_subcommand(color_count, input, output).block_on(),
         Commands::Find {
             input,
             output,
             replacement,
-            color_space,
-        } => find_subcommand(input, output, replacement, color_space.into()).block_on(),
-        Commands::Mix {
-            k,
+            mode,
+        } => find_subcommand(input, output, replacement, mode.into()).block_on(),
+        Commands::Reduce {
+            color_count,
             input,
             output,
-            extension,
-            color_space,
-            mix_mode,
-        } => mix_subcommand(
-            k,
-            input,
-            output,
-            extension,
-            color_space.into(),
-            mix_mode.into(),
-        )
-        .block_on(),
+            mode,
+        } => reduce_subcommand(color_count, input, output, mode.into()).block_on(),
     }?;
 
     Ok(())
 }
 
-async fn kmeans_subcommand(
-    k: u32,
-    input: PathBuf,
-    output: Option<PathBuf>,
-    extension: Option<Extension>,
-    color_space: ColorSpace,
-) -> Result<()> {
-    let image = image::open(&input)?.to_rgba8();
-    let image = to_lib_image(&image);
-
-    let image_processor = ImageProcessor::new().await?;
-    let result = kmeans(&image_processor, k, &image, &color_space)?;
-    let (width, height) = result.dimensions();
-
-    if let Some(output_image) =
-        ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, result.into_raw_pixels())
-    {
-        let output_file = output_file(k, "kmeans", &output, &input, &extension, &color_space)?;
-        output_image.save(output_file)?;
-    }
-
-    Ok(())
-}
-
 async fn palette_subcommand(
-    k: u32,
+    color_count: u32,
     input: PathBuf,
     output: Option<PathBuf>,
-    color_space: ColorSpace,
 ) -> Result<()> {
     let image = image::open(&input)?.to_rgba8();
     let image = to_lib_image(&image);
 
     let image_processor = ImageProcessor::new().await?;
-    let result = palette(&image_processor, k, &image, &color_space)?;
+    let result = palette(&image_processor, color_count, &image)?;
 
-    let path = palette_file(k, &input, &output, &color_space)?;
+    let path = palette_file(color_count, &input, &output)?;
     save_palette(path, &result)?;
 
     let colors = result
@@ -113,7 +70,7 @@ async fn find_subcommand(
     input: PathBuf,
     output: Option<PathBuf>,
     replacement: String,
-    color_space: ColorSpace,
+    reduce_mode: ReduceMode,
 ) -> Result<()> {
     let colors = parse_colors(&replacement)?;
 
@@ -121,45 +78,43 @@ async fn find_subcommand(
     let image = to_lib_image(&image);
 
     let image_processor = ImageProcessor::new().await?;
-    let result = find(&image_processor, &image, &colors, &color_space)?;
+    let result = find(&image_processor, &image, &colors, &reduce_mode)?;
 
     let (width, height) = result.dimensions();
 
     if let Some(output_image) =
         ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, result.into_raw_pixels())
     {
-        let output_file = find_file(&output, &input, &None, &color_space)?;
+        let output_file = find_file(&output, &input, &None)?;
         output_image.save(output_file)?;
     }
 
     Ok(())
 }
 
-async fn mix_subcommand(
-    k: u32,
+async fn reduce_subcommand(
+    color_count: u32,
     input: PathBuf,
     output: Option<PathBuf>,
-    extension: Option<Extension>,
-    color_space: ColorSpace,
-    mix_mode: MixMode,
+    reduce_mode: ReduceMode,
 ) -> Result<()> {
     let image = image::open(&input)?.to_rgba8();
     let image = to_lib_image(&image);
 
     let image_processor = ImageProcessor::new().await?;
-    let result = mix(&image_processor, k, &image, &color_space, &mix_mode)?;
+    let result = reduce(&image_processor, color_count, &image, &reduce_mode)?;
+
     let (width, height) = result.dimensions();
 
     if let Some(output_image) =
         ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, result.into_raw_pixels())
     {
         let output_file = output_file(
-            k,
-            &format!("mix-{mix_mode}"),
+            color_count,
+            &format!("reduce-{reduce_mode}"),
             &output,
             &input,
-            &extension,
-            &color_space,
+            &None,
         )?;
         output_image.save(output_file)?;
     }
@@ -168,12 +123,11 @@ async fn mix_subcommand(
 }
 
 fn output_file(
-    k: u32,
+    color_count: u32,
     function: &str,
     output: &Option<PathBuf>,
     input: &Path,
     extension: &Option<Extension>,
-    color_space: &ColorSpace,
 ) -> Result<PathBuf> {
     if let Some(output) = output {
         Ok(output.clone())
@@ -195,10 +149,7 @@ fn output_file(
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?;
         let millis = format!("{}{:03}", now.as_secs(), now.subsec_millis());
 
-        let filename = format!(
-            "{stem}-{function}-{cs}-k{k}-{millis}.{extension}",
-            cs = color_space.name()
-        );
+        let filename = format!("{stem}-{function}-c{color_count}-{millis}.{extension}");
         let output_path = if let Some(parent) = parent {
             parent.join(filename)
         } else {
@@ -209,12 +160,7 @@ fn output_file(
     }
 }
 
-fn palette_file(
-    k: u32,
-    input: &Path,
-    output: &Option<PathBuf>,
-    color_space: &ColorSpace,
-) -> Result<PathBuf> {
+fn palette_file(k: u32, input: &Path, output: &Option<PathBuf>) -> Result<PathBuf> {
     if let Some(output) = output {
         return Ok(output.clone());
     }
@@ -227,10 +173,7 @@ fn palette_file(
         .to_string_lossy();
     let extension = "png";
 
-    let filename = format!(
-        "{stem}-palette-{cs}-k{k}.{extension}",
-        cs = color_space.name()
-    );
+    let filename = format!("{stem}-palette-c{k}.{extension}",);
     let output_path = if let Some(parent) = parent {
         parent.join(filename)
     } else {
@@ -244,7 +187,6 @@ fn find_file(
     output: &Option<PathBuf>,
     input: &Path,
     extension: &Option<Extension>,
-    color_space: &ColorSpace,
 ) -> Result<PathBuf> {
     if let Some(output) = output {
         Ok(output.clone())
@@ -266,10 +208,7 @@ fn find_file(
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?;
         let millis = format!("{}{:03}", now.as_secs(), now.subsec_millis());
 
-        let filename = format!(
-            "{stem}-find-{cs}-{millis}.{extension}",
-            cs = color_space.name()
-        );
+        let filename = format!("{stem}-find-{millis}.{extension}",);
         let output_path = if let Some(parent) = parent {
             parent.join(filename)
         } else {

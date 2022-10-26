@@ -110,35 +110,23 @@ impl Display for ColorSpace {
 }
 
 #[derive(Clone, Copy)]
-pub enum MixMode {
+pub enum ReduceMode {
+    Replace,
     Dither,
     Meld,
 }
 
-impl MixMode {
-    fn name(&self) -> &'static str {
-        match self {
-            MixMode::Dither => "dither",
-            MixMode::Meld => "meld",
-        }
-    }
-}
-
-impl FromStr for MixMode {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "dither" => Ok(MixMode::Dither),
-            "meld" => Ok(MixMode::Meld),
-            _ => Err(anyhow!("Unsupported mix mode {s}")),
-        }
-    }
-}
-
-impl Display for MixMode {
+impl Display for ReduceMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.name())
+        write!(
+            f,
+            "{}",
+            match self {
+                ReduceMode::Replace => "replace",
+                ReduceMode::Dither => "dither",
+                ReduceMode::Meld => "meld",
+            }
+        )
     }
 }
 
@@ -686,38 +674,10 @@ impl Deref for CentroidsBuffer {
     }
 }
 
-pub fn kmeans<C: Container>(
-    image_processor: &ImageProcessor,
-    k: u32,
-    image: &Image<C>,
-    color_space: &ColorSpace,
-) -> Result<Image<Vec<[u8; 4]>>> {
-    let input_texture = InputTexture::new(&image_processor.device, &image_processor.queue, image);
-
-    let centroids_buffer = operations::extract_palette(
-        &image_processor.device,
-        &image_processor.queue,
-        &input_texture,
-        color_space,
-        k,
-        image_processor.query_time,
-    )?;
-    operations::find_colors(
-        &image_processor.device,
-        &image_processor.queue,
-        &input_texture,
-        color_space,
-        &centroids_buffer,
-        image_processor.query_time,
-    )?
-    .pull_image(&image_processor.device, &image_processor.queue)
-}
-
 pub fn palette<C: Container>(
     image_processor: &ImageProcessor,
     k: u32,
     image: &Image<C>,
-    color_space: &ColorSpace,
 ) -> Result<Vec<[u8; 4]>> {
     let input_texture = InputTexture::new(&image_processor.device, &image_processor.queue, image);
 
@@ -725,11 +685,15 @@ pub fn palette<C: Container>(
         &image_processor.device,
         &image_processor.queue,
         &input_texture,
-        color_space,
+        &ColorSpace::Lab,
         k,
         image_processor.query_time,
     )?
-    .pull_values(&image_processor.device, &image_processor.queue, color_space)?;
+    .pull_values(
+        &image_processor.device,
+        &image_processor.queue,
+        &ColorSpace::Lab,
+    )?;
 
     colors.sort_unstable_by(|a, b| {
         let a: Lab = Srgba::from_raw(a).into_format::<_, f32>().into_color();
@@ -743,29 +707,46 @@ pub fn find<C: Container>(
     image_processor: &ImageProcessor,
     image: &Image<C>,
     colors: &[[u8; 4]],
-    color_space: &ColorSpace,
+    reduce_mode: &ReduceMode,
 ) -> Result<Image<Vec<[u8; 4]>>> {
     let input_texture = InputTexture::new(&image_processor.device, &image_processor.queue, image);
     let centroids_buffer =
-        CentroidsBuffer::fixed_centroids(colors, color_space, &image_processor.device);
+        CentroidsBuffer::fixed_centroids(colors, &ColorSpace::Lab, &image_processor.device);
 
-    operations::find_colors(
-        &image_processor.device,
-        &image_processor.queue,
-        &input_texture,
-        color_space,
-        &centroids_buffer,
-        image_processor.query_time,
-    )?
+    match reduce_mode {
+        ReduceMode::Replace => operations::find_colors(
+            &image_processor.device,
+            &image_processor.queue,
+            &input_texture,
+            &ColorSpace::Lab,
+            &centroids_buffer,
+            image_processor.query_time,
+        ),
+        ReduceMode::Dither => operations::dither_colors(
+            &image_processor.device,
+            &image_processor.queue,
+            &input_texture,
+            &ColorSpace::Lab,
+            &centroids_buffer,
+            image_processor.query_time,
+        ),
+        ReduceMode::Meld => operations::meld_colors(
+            &image_processor.device,
+            &image_processor.queue,
+            &input_texture,
+            &ColorSpace::Lab,
+            &centroids_buffer,
+            image_processor.query_time,
+        ),
+    }?
     .pull_image(&image_processor.device, &image_processor.queue)
 }
 
-pub fn mix<C: Container>(
+pub fn reduce<C: Container>(
     image_processor: &ImageProcessor,
-    k: u32,
+    color_count: u32,
     image: &Image<C>,
-    color_space: &ColorSpace,
-    mix_mode: &MixMode,
+    reduce_mode: &ReduceMode,
 ) -> Result<Image<Vec<[u8; 4]>>> {
     let input_texture = InputTexture::new(&image_processor.device, &image_processor.queue, image);
 
@@ -773,19 +754,36 @@ pub fn mix<C: Container>(
         &image_processor.device,
         &image_processor.queue,
         &input_texture,
-        color_space,
-        k,
+        &ColorSpace::Lab,
+        color_count,
         image_processor.query_time,
     )?;
 
-    operations::mix_colors(
-        &image_processor.device,
-        &image_processor.queue,
-        &input_texture,
-        color_space,
-        mix_mode,
-        &centroids_buffer,
-        image_processor.query_time,
-    )?
+    match reduce_mode {
+        ReduceMode::Replace => operations::find_colors(
+            &image_processor.device,
+            &image_processor.queue,
+            &input_texture,
+            &ColorSpace::Lab,
+            &centroids_buffer,
+            image_processor.query_time,
+        ),
+        ReduceMode::Dither => operations::dither_colors(
+            &image_processor.device,
+            &image_processor.queue,
+            &input_texture,
+            &ColorSpace::Lab,
+            &centroids_buffer,
+            image_processor.query_time,
+        ),
+        ReduceMode::Meld => operations::meld_colors(
+            &image_processor.device,
+            &image_processor.queue,
+            &input_texture,
+            &ColorSpace::Lab,
+            &centroids_buffer,
+            image_processor.query_time,
+        ),
+    }?
     .pull_image(&image_processor.device, &image_processor.queue)
 }

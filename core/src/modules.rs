@@ -13,7 +13,7 @@ use wgpu::{
 
 use crate::{
     utils::compute_work_group_count, CentroidsBuffer, ColorIndexTexture, ColorSpace, InputTexture,
-    MixMode, OutputTexture, WorkTexture,
+    OutputTexture, WorkTexture,
 };
 
 pub(crate) trait Module {
@@ -1277,6 +1277,12 @@ impl<'a> PlusPlusInitModule<'a> {
             staging_buffer.unmap();
         }
     }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum MixMode {
+    Dither,
+    Meld,
 }
 
 pub(crate) struct MixColorsModule {

@@ -18,40 +18,19 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Create an image quantized with kmeans
-    Kmeans {
-        /// K value, aka the number of colors we want to extract
-        #[clap(short, value_parser = validate_k)]
-        k: u32,
-        /// Input file
-        #[clap(short, long, value_parser = validate_filenames)]
-        input: PathBuf,
-        /// Optional output file
-        #[clap(short, long, value_parser)]
-        output: Option<PathBuf>,
-        /// Optional extension to use if an output file is not specified
-        #[clap(short, long)]
-        extension: Option<Extension>,
-        /// The colorspace to use when calculating colors. Lab gives more natural colors
-        #[clap(value_enum, short, long="colorspace", default_value_t=ColorSpace::Lab)]
-        color_space: ColorSpace,
-    },
-    /// Output the palette calculated with k-means
+    /// Quantized the image then output the reduced palette.
     Palette {
-        /// K value, aka the number of colors we want to extract
-        #[clap(short, value_parser = validate_k)]
-        k: u32,
+        /// Color count of the generated palette
+        #[clap(short, long="colorcount", value_parser = validate_k)]
+        color_count: u32,
         /// Input file
         #[clap(short, long, value_parser = validate_filenames)]
         input: PathBuf,
         /// Optional output file
         #[clap(short, long, value_parser)]
         output: Option<PathBuf>,
-        /// The colorspace to use when calculating colors. Lab gives more natural colors
-        #[clap(value_enum, short, long="colorspace", default_value_t=ColorSpace::Lab)]
-        color_space: ColorSpace,
     },
-    /// Find colors in image that are closest to the replacements, and swap them
+    /// Find colors in image that are closest to the replacements, and swap them.
     Find {
         /// Input file
         #[clap(short, long, value_parser = validate_filenames)]
@@ -62,30 +41,24 @@ pub enum Commands {
         /// List of RGB replacement colors formatted as "#RRGGBB,#RRGGBB"
         #[clap(short, long, value_parser = validate_replacement)]
         replacement: String,
-        /// The colorspace to use when calculating colors. Lab gives more natural colors
-        #[clap(value_enum, short, long="colorspace", default_value_t=ColorSpace::Lab)]
-        color_space: ColorSpace,
+        /// Mix function to apply on the result
+        #[clap(value_enum, short, long, default_value_t=ReduceMode::Replace)]
+        mode: ReduceMode,
     },
-    /// Quantized the image with kmeans, then mix it's resulting color.
-    Mix {
-        /// K value, aka the number of colors we want to extract
-        #[clap(short, value_parser = validate_k_for_dithering)]
-        k: u32,
+    /// Quantized the image then replaces it's resulting color.
+    Reduce {
+        /// Color count of the generated palette
+        #[clap(short, long="colorcount", value_parser = validate_k)]
+        color_count: u32,
         /// Input file
         #[clap(short, long, value_parser = validate_filenames)]
         input: PathBuf,
         /// Optional output file
         #[clap(short, long, value_parser)]
         output: Option<PathBuf>,
-        /// Optional extension to use if an output file is not specified
-        #[clap(short, long)]
-        extension: Option<Extension>,
-        /// The colorspace to use when calculating colors. Lab gives more natural colors
-        #[clap(value_enum, short, long="colorspace", default_value_t=ColorSpace::Lab)]
-        color_space: ColorSpace,
         /// Mix function to apply on the result
-        #[clap(value_enum, short, long="mixmode", default_value_t=MixMode::Dither)]
-        mix_mode: MixMode,
+        #[clap(value_enum, short, long, default_value_t=ReduceMode::Replace)]
+        mode: ReduceMode,
     },
 }
 
@@ -96,16 +69,18 @@ pub enum Extension {
 }
 
 #[derive(Clone, Copy, ValueEnum)]
-pub enum MixMode {
+pub enum ReduceMode {
+    Replace,
     Dither,
     Meld,
 }
 
-impl From<MixMode> for k_means_gpu::MixMode {
-    fn from(mix_mode: MixMode) -> Self {
-        match mix_mode {
-            MixMode::Dither => k_means_gpu::MixMode::Dither,
-            MixMode::Meld => k_means_gpu::MixMode::Meld,
+impl From<ReduceMode> for k_means_gpu::ReduceMode {
+    fn from(reduce_mode: ReduceMode) -> Self {
+        match reduce_mode {
+            ReduceMode::Replace => k_means_gpu::ReduceMode::Replace,
+            ReduceMode::Dither => k_means_gpu::ReduceMode::Dither,
+            ReduceMode::Meld => k_means_gpu::ReduceMode::Meld,
         }
     }
 }
@@ -162,19 +137,6 @@ fn validate_k(s: &str) -> Result<u32> {
             }
         }
         Err(_) => Err(anyhow!("k must be an integer higher than 0.")),
-    }
-}
-
-fn validate_k_for_dithering(s: &str) -> Result<u32> {
-    match s.parse::<u32>() {
-        Ok(k) => {
-            if k >= 2 {
-                Ok(k)
-            } else {
-                Err(anyhow!("k must be an integer, minimum 2."))
-            }
-        }
-        Err(_) => Err(anyhow!("k must be an integer, minimum 2.")),
     }
 }
 
