@@ -15,34 +15,42 @@ As this loads an image as a texture to your graphic cards, it also comes with so
 ### Create image with colors replaced by their kmeans variant:
 
 ```sh
-cargo run --release -- kmeans -i .\gfx\tokyo.png -k 8
+cargo run --release -- reduce -i .\gfx\tokyo.png -c 8
 ```
 
-![Tokyo with k=8](gfx/tokyo-kmeans-lab-k8.png)
+![Tokyo with k=8](gfx/tokyo-reduce-c8-replace.png)
 
-### Output the palette:
+### Create a dithered image with colors reduced with kmeans:
 
 ```sh
-cargo run --release -- palette -i .\gfx\tokyo.png -k 8
+cargo run --release -- reduce -i .\gfx\tokyo.png -c 8 -m dither
 ```
 
-![Tokyo palette with k=8](gfx/tokyo-palette-lab-k8.png)
+![Tokyo with k=8](gfx/tokyo-reduce-c8-dither.png)
 
 ### Find colors and use them as replacement
 
 ```sh
-cargo run --release -- find -i .\gfx\tokyo.png -r "#050505,#ffffff,#ff0000"
+cargo run --release -- find -i .\gfx\tokyo.png -p "#050505,#ffffff,#ff0000"
 ```
 
-![Tokyo with looked up colors](gfx/tokyo-find-lab-dark-white-red.png)
+![Tokyo with looked up colors](gfx/tokyo-find-replace-dark-white-red.png)
 
-### Dither image:
+### Find colors and use them to dither the image
 
 ```sh
-cargo run --release -- mix -i .\gfx\tokyo.png -k 8
+cargo run --release -- find -i .\gfx\tokyo.png -p "#050505,#ffffff,#ff0000" -m dither
 ```
 
-![Tokyo dithered with k=8](gfx/tokyo-mix-dither-lab-k8.png)
+![Tokyo with looked up colors](gfx/tokyo-find-dither-dark-white-red.png)
+
+### Output the palette:
+
+```sh
+cargo run --release -- palette -i .\gfx\tokyo.png -c 8
+```
+
+![Tokyo palette with c=8](gfx/tokyo-palette-c8.png)
 
 ## Sources
 

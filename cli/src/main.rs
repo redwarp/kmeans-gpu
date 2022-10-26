@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::{Ok, Result};
-use args::{Cli, Commands, Extension};
+use args::{Cli, Commands, Extension, Palette};
 use clap::Parser;
 use image::{ImageBuffer, Rgba, RgbaImage};
 use k_means_gpu::{find, image::Image, palette, reduce, ImageProcessor, ReduceMode};
@@ -27,9 +27,9 @@ fn main() -> Result<()> {
         Commands::Find {
             input,
             output,
-            replacement,
+            palette,
             mode,
-        } => find_subcommand(input, output, replacement, mode.into()).block_on(),
+        } => find_subcommand(input, output, palette, mode.into()).block_on(),
         Commands::Reduce {
             color_count,
             input,
@@ -69,23 +69,21 @@ async fn palette_subcommand(
 async fn find_subcommand(
     input: PathBuf,
     output: Option<PathBuf>,
-    replacement: String,
+    palette: Palette,
     reduce_mode: ReduceMode,
 ) -> Result<()> {
-    let colors = parse_colors(&replacement)?;
-
     let image = image::open(&input)?.to_rgba8();
     let image = to_lib_image(&image);
 
     let image_processor = ImageProcessor::new().await?;
-    let result = find(&image_processor, &image, &colors, &reduce_mode)?;
+    let result = find(&image_processor, &image, &palette.colors, &reduce_mode)?;
 
     let (width, height) = result.dimensions();
 
     if let Some(output_image) =
         ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, result.into_raw_pixels())
     {
-        let output_file = find_file(&output, &input, &None)?;
+        let output_file = find_file(&reduce_mode, &output, &input, &None)?;
         output_image.save(output_file)?;
     }
 
@@ -109,22 +107,16 @@ async fn reduce_subcommand(
     if let Some(output_image) =
         ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, result.into_raw_pixels())
     {
-        let output_file = output_file(
-            color_count,
-            &format!("reduce-{reduce_mode}"),
-            &output,
-            &input,
-            &None,
-        )?;
+        let output_file = reduce_file(color_count, &reduce_mode, &output, &input, &None)?;
         output_image.save(output_file)?;
     }
 
     Ok(())
 }
 
-fn output_file(
+fn reduce_file(
     color_count: u32,
-    function: &str,
+    reduce_mode: &ReduceMode,
     output: &Option<PathBuf>,
     input: &Path,
     extension: &Option<Extension>,
@@ -146,10 +138,7 @@ fn output_file(
                 .to_string_lossy()
         };
 
-        let now = SystemTime::now().duration_since(UNIX_EPOCH)?;
-        let millis = format!("{}{:03}", now.as_secs(), now.subsec_millis());
-
-        let filename = format!("{stem}-{function}-c{color_count}-{millis}.{extension}");
+        let filename = format!("{stem}-reduce-c{color_count}-{reduce_mode}.{extension}");
         let output_path = if let Some(parent) = parent {
             parent.join(filename)
         } else {
@@ -184,6 +173,7 @@ fn palette_file(k: u32, input: &Path, output: &Option<PathBuf>) -> Result<PathBu
 }
 
 fn find_file(
+    reduce_mode: &ReduceMode,
     output: &Option<PathBuf>,
     input: &Path,
     extension: &Option<Extension>,
@@ -208,7 +198,7 @@ fn find_file(
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?;
         let millis = format!("{}{:03}", now.as_secs(), now.subsec_millis());
 
-        let filename = format!("{stem}-find-{millis}.{extension}",);
+        let filename = format!("{stem}-find-{reduce_mode}-{millis}.{extension}",);
         let output_path = if let Some(parent) = parent {
             parent.join(filename)
         } else {
@@ -238,40 +228,6 @@ where
     image_buffer.save(path)?;
 
     Ok(())
-}
-
-fn parse_colors(colors: &str) -> Result<Vec<[u8; 4]>> {
-    colors
-        .split(',')
-        .map(|color_string| {
-            let r = u8::from_str_radix(&color_string[1..3], 16)?;
-            let g = u8::from_str_radix(&color_string[3..5], 16)?;
-            let b = u8::from_str_radix(&color_string[5..7], 16)?;
-
-            Ok([r, g, b, 255])
-        })
-        .collect::<Result<Vec<_>>>()
-}
-
-#[cfg(test)]
-mod tests {
-    // Note this useful idiom: importing names from outer (for mod tests) scope.
-    use super::*;
-
-    #[test]
-    fn test_parse_colors() {
-        let colors = String::from("#ffffff,#000000");
-
-        let parsed = parse_colors(&colors);
-
-        assert!(parsed.is_ok());
-
-        let parsed = parsed.unwrap();
-        assert_eq!(2, parsed.len());
-
-        let expected: Vec<[u8; 4]> = vec![[255, 255, 255, 255], [0, 0, 0, 255]];
-        assert_eq!(parsed, expected);
-    }
 }
 
 fn to_lib_image(image: &RgbaImage) -> Image<&[[u8; 4]]> {
