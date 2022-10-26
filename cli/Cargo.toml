@@ -13,7 +13,10 @@ exclude = ["gfx", ".vscode"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
-image = "0.24"
+image = { version = "0.24", default-features = false, features = [
+    "png",
+    "jpeg"
+] }
 anyhow = "1.0"
 pollster = "0.2"
 clap = { version = "4.0", features = ["cargo", "derive"] }
