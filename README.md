@@ -44,6 +44,14 @@ cargo run --release -- find -i .\gfx\tokyo.png -p "#050505,#ffffff,#ff0000" -m d
 
 ![Tokyo with looked up colors](gfx/tokyo-find-dither-dark-white-red.png)
 
+### Find colors by loading a palette to dither the image
+
+```sh
+cargo run --release -- find -i .\gfx\tokyo.png -p .\gfx\apollo-1x.png -m dither
+```
+
+![Tokyo with looked up colors](gfx/tokyo-find-dither-apollo.png)
+
 ### Output the palette:
 
 ```sh
@@ -69,6 +77,7 @@ I had to read a bunch of stuff to even start to make sense of it all.
   + http://alex-charlton.com/posts/Dithering_on_the_GPU/
 * Resources:
   + Resurrect 64 color palette by [Kerrie Lake](https://lospec.com/kerrielake).
+  + Apollo palette by [Adam C Younis](https://lospec.com/adamcyounis)
 
 ## License
 

@@ -38,7 +38,7 @@ pub enum Commands {
         /// Optional output file
         #[clap(short, long, value_parser)]
         output: Option<PathBuf>,
-        /// List of RGB replacement colors formatted as "#RRGGBB,#RRGGBB"
+        /// List of RGB replacement colors formatted as "#RRGGBB,#RRGGBB" or path to a palette image
         #[clap(short, long, value_parser = validate_palette)]
         palette: Palette,
         /// Mix function to apply on the result
@@ -146,7 +146,7 @@ fn validate_k(s: &str) -> Result<u32> {
 }
 
 fn validate_filenames(s: &str) -> Result<PathBuf> {
-    if s.len() > 4 && s.ends_with(".png") || s.ends_with(".jpg") {
+    if s.len() > 4 && (s.ends_with(".png") || s.ends_with(".jpg")) {
         Ok(PathBuf::from(s))
     } else {
         Err(anyhow!("Only support png or jpg files."))
@@ -158,10 +158,36 @@ fn validate_palette(s: &str) -> Result<Palette> {
     if re.is_match(s) {
         parse_colors(s)
     } else {
-        Err(anyhow!(
-            "The palette should be define as \"#ffaa12,#fe7845,#aabbff\""
-        ))
+        let path = PathBuf::from(s);
+        if s.len() > 4 && (s.ends_with(".png") || s.ends_with(".jpg")) && path.exists() {
+            parse_palette(&path)
+        } else {
+            Err(anyhow!(
+                "The palette should be a path to an image file, or defined as \"#RRGGBB,#RRGGBB,#RRGGBB\""
+            ))
+        }
     }
+}
+
+fn parse_palette(path: &PathBuf) -> Result<Palette> {
+    let image = image::open(&path)?.to_rgba8();
+    let (width, height) = image.dimensions();
+    let pixel_count = width as usize * height as usize;
+
+    if pixel_count > 512 {
+        return Err(anyhow!(
+            "Trying to load a palette with more than 512 colors"
+        ));
+    }
+
+    let mut colors: Vec<[u8; 4]> = bytemuck::cast_slice(image.as_raw()).to_vec();
+    colors.sort();
+    colors.dedup();
+
+    if colors.len() < pixel_count {
+        return Err(anyhow!("Trying to load a palette with recuring colors"));
+    }
+    Ok(Palette { colors })
 }
 
 fn parse_colors(colors: &str) -> Result<Palette> {
@@ -223,5 +249,20 @@ mod tests {
 
         let expected: Vec<[u8; 4]> = vec![[255, 255, 255, 255], [0, 0, 0, 255]];
         assert_eq!(colors, expected);
+    }
+
+    #[test]
+    fn test_parse_palette() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let mut palette_path = PathBuf::from(manifest_dir);
+        palette_path.push("../gfx/resurrect_64.png");
+
+        let parsed = parse_palette(&palette_path);
+
+        assert!(parsed.is_ok());
+
+        let parsed = parsed.unwrap();
+
+        assert_eq!(64, parsed.colors.len());
     }
 }
