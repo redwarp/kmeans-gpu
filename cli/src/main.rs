@@ -8,7 +8,9 @@ use anyhow::{Ok, Result};
 use args::{Cli, Commands, Extension, Palette};
 use clap::Parser;
 use image::{ImageBuffer, Rgba, RgbaImage};
-use k_means_gpu::{find, image::Image, palette, reduce, ImageProcessor, ReduceMode};
+use k_means_gpu::{
+    find, image::Image, octree_palette, palette, reduce, ImageProcessor, ReduceMode,
+};
 use pollster::FutureExt;
 
 mod args;
@@ -23,7 +25,7 @@ fn main() -> Result<()> {
             color_count,
             input,
             output,
-        } => palette_subcommand(color_count, input, output).block_on(),
+        } => palette_subcommand2(color_count, input, output).block_on(),
         Commands::Find {
             input,
             output,
@@ -41,7 +43,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-async fn palette_subcommand(
+async fn _palette_subcommand(
     color_count: u32,
     input: PathBuf,
     output: Option<PathBuf>,
@@ -51,6 +53,31 @@ async fn palette_subcommand(
 
     let image_processor = ImageProcessor::new().await?;
     let result = palette(&image_processor, color_count, &image)?;
+
+    let path = palette_file(color_count, &input, &output)?;
+    save_palette(path, &result)?;
+
+    let colors = result
+        .into_iter()
+        .map(|color| format!("#{:02X}{:02X}{:02X}", color[0], color[1], color[2]))
+        .collect::<Vec<_>>()
+        .join(",");
+
+    println!("Palette: {colors}");
+
+    Ok(())
+}
+
+async fn palette_subcommand2(
+    color_count: u32,
+    input: PathBuf,
+    output: Option<PathBuf>,
+) -> Result<()> {
+    let image = image::open(&input)?.to_rgba8();
+    let image = to_lib_image(&image);
+
+    let image_processor = ImageProcessor::new().await?;
+    let result = octree_palette(&image_processor, color_count, &image)?;
 
     let path = palette_file(color_count, &input, &output)?;
     save_palette(path, &result)?;
@@ -213,7 +240,7 @@ fn save_palette<P>(path: P, palette: &[[u8; 4]]) -> Result<()>
 where
     P: AsRef<Path>,
 {
-    let height = 40;
+    let height = 1;
     let width = palette.len() as u32 * height;
 
     let mut image_buffer: image::RgbaImage = image::ImageBuffer::new(width, height);
