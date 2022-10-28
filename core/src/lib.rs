@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Result};
 use image::{copied_pixel, Container, Image};
-use octree::ColorTree;
 use palette::{IntoColor, Lab, Pixel, Srgb, Srgba};
 use std::{fmt::Display, ops::Deref, str::FromStr, sync::mpsc::channel, time::Instant, vec};
 use utils::{compute_work_group_count, padded_bytes_per_row};
@@ -108,6 +107,25 @@ impl FromStr for ColorSpace {
 impl Display for ColorSpace {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.name())
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum Algorithm {
+    Kmeans,
+    Octree,
+}
+
+impl Display for Algorithm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Algorithm::Kmeans => "kmeans",
+                Algorithm::Octree => "octree",
+            }
+        )
     }
 }
 
@@ -865,31 +883,14 @@ impl Deref for CentroidsBuffer {
 
 pub fn palette<C: Container>(
     image_processor: &ImageProcessor,
-    k: u32,
+    color_count: u32,
     image: &Image<C>,
+    algo: Algorithm,
 ) -> Result<Vec<[u8; 4]>> {
-    let input_texture = InputTexture::new(&image_processor.device, &image_processor.queue, image);
-
-    let mut colors = operations::extract_palette(
-        &image_processor.device,
-        &image_processor.queue,
-        &input_texture,
-        &ColorSpace::Lab,
-        k,
-        image_processor.query_time,
-    )?
-    .pull_values(
-        &image_processor.device,
-        &image_processor.queue,
-        &ColorSpace::Lab,
-    )?;
-
-    colors.sort_unstable_by(|a, b| {
-        let a: Lab = Srgba::from_raw(a).into_format::<_, f32>().into_color();
-        let b: Lab = Srgba::from_raw(b).into_format::<_, f32>().into_color();
-        a.l.partial_cmp(&b.l).unwrap()
-    });
-    Ok(colors)
+    match algo {
+        Algorithm::Kmeans => kmeans_palette(image_processor, color_count, image),
+        Algorithm::Octree => octree_palette(image_processor, color_count, image),
+    }
 }
 
 pub fn find<C: Container>(
@@ -935,18 +936,25 @@ pub fn reduce<C: Container>(
     image_processor: &ImageProcessor,
     color_count: u32,
     image: &Image<C>,
+    algo: &Algorithm,
     reduce_mode: &ReduceMode,
 ) -> Result<Image<Vec<[u8; 4]>>> {
     let input_texture = InputTexture::new(&image_processor.device, &image_processor.queue, image);
 
-    let centroids_buffer = operations::extract_palette(
-        &image_processor.device,
-        &image_processor.queue,
-        &input_texture,
-        &ColorSpace::Lab,
-        color_count,
-        image_processor.query_time,
-    )?;
+    let centroids_buffer = match algo {
+        Algorithm::Kmeans => operations::extract_palette_kmeans(
+            &image_processor.device,
+            &image_processor.queue,
+            &input_texture,
+            &ColorSpace::Lab,
+            color_count,
+            image_processor.query_time,
+        )?,
+        Algorithm::Octree => {
+            let palette = octree_palette(image_processor, color_count, image)?;
+            CentroidsBuffer::fixed_centroids(&palette, &ColorSpace::Lab, &image_processor.device)
+        }
+    };
 
     match reduce_mode {
         ReduceMode::Replace => operations::find_colors(
@@ -977,7 +985,36 @@ pub fn reduce<C: Container>(
     .pull_image(&image_processor.device, &image_processor.queue)
 }
 
-pub fn octree_palette<C: Container>(
+fn kmeans_palette<C: Container>(
+    image_processor: &ImageProcessor,
+    color_count: u32,
+    image: &Image<C>,
+) -> Result<Vec<[u8; 4]>> {
+    let input_texture = InputTexture::new(&image_processor.device, &image_processor.queue, image);
+
+    let mut colors = operations::extract_palette_kmeans(
+        &image_processor.device,
+        &image_processor.queue,
+        &input_texture,
+        &ColorSpace::Lab,
+        color_count,
+        image_processor.query_time,
+    )?
+    .pull_values(
+        &image_processor.device,
+        &image_processor.queue,
+        &ColorSpace::Lab,
+    )?;
+
+    colors.sort_unstable_by(|a, b| {
+        let a: Lab = Srgba::from_raw(a).into_format::<_, f32>().into_color();
+        let b: Lab = Srgba::from_raw(b).into_format::<_, f32>().into_color();
+        a.l.partial_cmp(&b.l).unwrap()
+    });
+    Ok(colors)
+}
+
+fn octree_palette<C: Container>(
     image_processor: &ImageProcessor,
     color_count: u32,
     image: &Image<C>,
@@ -1004,16 +1041,12 @@ pub fn octree_palette<C: Container>(
     };
 
     let start = Instant::now();
-    let mut tree = ColorTree::new();
+    let mut colors = operations::extract_palette_octree(pixels, color_count)?;
 
-    for pixel in pixels {
-        tree.add_color(pixel);
+    if image_processor.query_time {
+        let duration = start.elapsed();
+        println!("Time elapsed in octree() is: {duration:?}");
     }
-
-    let mut colors = tree.reduce(color_count as usize);
-    let duration = start.elapsed();
-
-    println!("Time elapsed in octree() is: {duration:?}");
 
     colors.sort_unstable_by(|a, b| {
         let a: Lab = Srgba::from_raw(a).into_format::<_, f32>().into_color();
