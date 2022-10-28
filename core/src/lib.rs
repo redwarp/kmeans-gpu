@@ -21,7 +21,7 @@ mod utils;
 
 pub mod image;
 
-const MAX_IMAGE_DIMENSION: u32 = 256;
+const MAX_IMAGE_DIMENSION: u32 = 512;
 
 pub struct ImageProcessor {
     device: Device,
@@ -194,117 +194,13 @@ impl InputTexture {
     fn shrunk(&self, device: &Device, queue: &Queue) -> Option<InputTexture> {
         let (width, height) = self.dimensions;
         if width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION {
-            // Need resize.
-            let new_width;
-            let new_height;
-            if width > height {
-                new_width = MAX_IMAGE_DIMENSION;
-                new_height =
-                    ((height as f32 * MAX_IMAGE_DIMENSION as f32 / width as f32) as u32).max(1);
-            } else {
-                new_height = MAX_IMAGE_DIMENSION;
-                new_width =
-                    ((width as f32 * MAX_IMAGE_DIMENSION as f32 / height as f32) as u32).max(1);
-            }
-
-            let texture_size = wgpu::Extent3d {
-                width: new_width,
-                height: new_height,
-                depth_or_array_layers: 1,
-            };
-
-            let updated_texture = device.create_texture(&TextureDescriptor {
-                label: None,
-                size: texture_size,
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: TextureDimension::D2,
-                format: TextureFormat::Rgba8Unorm,
-                usage: TextureUsages::TEXTURE_BINDING
-                    | TextureUsages::COPY_SRC
-                    | TextureUsages::STORAGE_BINDING,
-            });
-
-            let resize_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Resize shader"),
-                source: ShaderSource::Wgsl(include_str!("shaders/resize.wgsl").into()),
-            });
-
-            let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-                label: Some("Resize pipeline"),
-                layout: None,
-                module: &resize_shader,
-                entry_point: "main",
-            });
-
-            let filter_mode = FilterMode::Linear;
-
-            let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-                label: None,
-                address_mode_u: AddressMode::ClampToEdge,
-                address_mode_v: AddressMode::ClampToEdge,
-                address_mode_w: AddressMode::ClampToEdge,
-                mag_filter: filter_mode,
-                min_filter: filter_mode,
-                mipmap_filter: filter_mode,
-                ..Default::default()
-            });
-
-            let compute_constants = device.create_bind_group(&BindGroupDescriptor {
-                label: Some("Compute constants"),
-                layout: &pipeline.get_bind_group_layout(0),
-                entries: &[BindGroupEntry {
-                    binding: 0,
-                    resource: BindingResource::Sampler(&sampler),
-                }],
-            });
-
-            let texture_bind_group = device.create_bind_group(&BindGroupDescriptor {
-                label: Some("Texture bind group"),
-                layout: &pipeline.get_bind_group_layout(1),
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: BindingResource::TextureView(
-                            &self.texture.create_view(&TextureViewDescriptor::default()),
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: BindingResource::TextureView(
-                            &updated_texture.create_view(&TextureViewDescriptor::default()),
-                        ),
-                    },
-                ],
-            });
-
-            let mut encoder =
-                device.create_command_encoder(&CommandEncoderDescriptor { label: None });
-
-            {
-                let (dispatch_with, dispatch_height) =
-                    compute_work_group_count((texture_size.width, texture_size.height), (16, 16));
-                let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                    label: Some("Resize pass"),
-                });
-                compute_pass.set_pipeline(&pipeline);
-                compute_pass.set_bind_group(0, &compute_constants, &[]);
-                compute_pass.set_bind_group(1, &texture_bind_group, &[]);
-                compute_pass.dispatch_workgroups(dispatch_with, dispatch_height, 1);
-            }
-
-            queue.submit(Some(encoder.finish()));
-
-            Some(Self {
-                texture: updated_texture,
-                dimensions: (new_width, new_height),
-            })
+            Some(self.resized(MAX_IMAGE_DIMENSION, device, queue))
         } else {
             None
         }
     }
 
-    fn resized(self, max_size: u32, device: &Device, queue: &Queue) -> InputTexture {
+    fn resized(&self, max_size: u32, device: &Device, queue: &Queue) -> InputTexture {
         let (width, height) = self.dimensions;
 
         let (new_width, new_height) = if width > height {
