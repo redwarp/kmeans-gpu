@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use image::{copied_pixel, Container, Image};
 use octree::ColorTree;
 use palette::{IntoColor, Lab, Pixel, Srgb, Srgba};
-use std::{fmt::Display, ops::Deref, str::FromStr, sync::mpsc::channel, vec};
+use std::{fmt::Display, ops::Deref, str::FromStr, sync::mpsc::channel, time::Instant, vec};
 use utils::{compute_work_group_count, padded_bytes_per_row};
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
@@ -1003,6 +1003,7 @@ pub fn octree_palette<C: Container>(
         &image.rgba
     };
 
+    let start = Instant::now();
     let mut tree = ColorTree::new();
 
     for pixel in pixels {
@@ -1010,6 +1011,9 @@ pub fn octree_palette<C: Container>(
     }
 
     let mut colors = tree.reduce(color_count as usize);
+    let duration = start.elapsed();
+
+    println!("Time elapsed in octree() is: {duration:?}");
 
     colors.sort_unstable_by(|a, b| {
         let a: Lab = Srgba::from_raw(a).into_format::<_, f32>().into_color();
