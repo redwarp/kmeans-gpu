@@ -1,5 +1,6 @@
 use std::{
     cell::RefCell,
+    collections::VecDeque,
     ops::{AddAssign, Deref},
     rc::Rc,
 };
@@ -73,9 +74,10 @@ impl ColorTree {
             .cloned()
             .collect();
         leaves.sort_by(|a, b| a.cmp(b).reverse());
+        let mut leaves: VecDeque<_> = leaves.into_iter().collect();
 
         while leaves.len() > color_count {
-            let node = leaves.pop().expect("Len is > 0");
+            let node = leaves.pop_back().expect("Len is > 0");
             let color_index = node.borrow().color_index;
             let parent_id = node.borrow().parent;
             if let Some(parent_id) = parent_id {
