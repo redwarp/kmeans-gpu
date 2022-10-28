@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use image::{copied_pixel, Container, Image};
 use palette::{IntoColor, Lab, Pixel, Srgb, Srgba};
-use std::{fmt::Display, ops::Deref, str::FromStr, sync::mpsc::channel, vec};
+use std::{fmt::Display, ops::Deref, str::FromStr, sync::mpsc::channel, time::Instant, vec};
 use utils::{compute_work_group_count, padded_bytes_per_row};
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
@@ -15,12 +15,13 @@ use wgpu::{
 };
 
 mod modules;
+mod octree;
 mod operations;
 mod utils;
 
-const MAX_IMAGE_DIMENSION: u32 = 512;
-
 pub mod image;
+
+const MAX_IMAGE_DIMENSION: u32 = 512;
 
 pub struct ImageProcessor {
     device: Device,
@@ -110,6 +111,25 @@ impl Display for ColorSpace {
 }
 
 #[derive(Clone, Copy)]
+pub enum Algorithm {
+    Kmeans,
+    Octree,
+}
+
+impl Display for Algorithm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Algorithm::Kmeans => "kmeans",
+                Algorithm::Octree => "octree",
+            }
+        )
+    }
+}
+
+#[derive(Clone, Copy)]
 pub enum ReduceMode {
     Replace,
     Dither,
@@ -174,113 +194,196 @@ impl InputTexture {
     fn shrunk(&self, device: &Device, queue: &Queue) -> Option<InputTexture> {
         let (width, height) = self.dimensions;
         if width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION {
-            // Need resize.
-            let new_width;
-            let new_height;
-            if width > height {
-                new_width = MAX_IMAGE_DIMENSION;
-                new_height =
-                    ((height as f32 * MAX_IMAGE_DIMENSION as f32 / width as f32) as u32).max(1);
-            } else {
-                new_height = MAX_IMAGE_DIMENSION;
-                new_width =
-                    ((width as f32 * MAX_IMAGE_DIMENSION as f32 / height as f32) as u32).max(1);
-            }
-
-            let texture_size = wgpu::Extent3d {
-                width: new_width,
-                height: new_height,
-                depth_or_array_layers: 1,
-            };
-
-            let updated_texture = device.create_texture(&TextureDescriptor {
-                label: None,
-                size: texture_size,
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: TextureDimension::D2,
-                format: TextureFormat::Rgba8Unorm,
-                usage: TextureUsages::TEXTURE_BINDING
-                    | TextureUsages::COPY_SRC
-                    | TextureUsages::STORAGE_BINDING,
-            });
-
-            let resize_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Resize shader"),
-                source: ShaderSource::Wgsl(include_str!("shaders/resize.wgsl").into()),
-            });
-
-            let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-                label: Some("Resize pipeline"),
-                layout: None,
-                module: &resize_shader,
-                entry_point: "main",
-            });
-
-            let filter_mode = FilterMode::Linear;
-
-            let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-                label: None,
-                address_mode_u: AddressMode::ClampToEdge,
-                address_mode_v: AddressMode::ClampToEdge,
-                address_mode_w: AddressMode::ClampToEdge,
-                mag_filter: filter_mode,
-                min_filter: filter_mode,
-                mipmap_filter: filter_mode,
-                ..Default::default()
-            });
-
-            let compute_constants = device.create_bind_group(&BindGroupDescriptor {
-                label: Some("Compute constants"),
-                layout: &pipeline.get_bind_group_layout(0),
-                entries: &[BindGroupEntry {
-                    binding: 0,
-                    resource: BindingResource::Sampler(&sampler),
-                }],
-            });
-
-            let texture_bind_group = device.create_bind_group(&BindGroupDescriptor {
-                label: Some("Texture bind group"),
-                layout: &pipeline.get_bind_group_layout(1),
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: BindingResource::TextureView(
-                            &self.texture.create_view(&TextureViewDescriptor::default()),
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: BindingResource::TextureView(
-                            &updated_texture.create_view(&TextureViewDescriptor::default()),
-                        ),
-                    },
-                ],
-            });
-
-            let mut encoder =
-                device.create_command_encoder(&CommandEncoderDescriptor { label: None });
-
-            {
-                let (dispatch_with, dispatch_height) =
-                    compute_work_group_count((texture_size.width, texture_size.height), (16, 16));
-                let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                    label: Some("Resize pass"),
-                });
-                compute_pass.set_pipeline(&pipeline);
-                compute_pass.set_bind_group(0, &compute_constants, &[]);
-                compute_pass.set_bind_group(1, &texture_bind_group, &[]);
-                compute_pass.dispatch_workgroups(dispatch_with, dispatch_height, 1);
-            }
-
-            queue.submit(Some(encoder.finish()));
-
-            Some(Self {
-                texture: updated_texture,
-                dimensions: (new_width, new_height),
-            })
+            Some(self.resized(MAX_IMAGE_DIMENSION, device, queue))
         } else {
             None
+        }
+    }
+
+    fn resized(&self, max_size: u32, device: &Device, queue: &Queue) -> InputTexture {
+        let (width, height) = self.dimensions;
+
+        let (new_width, new_height) = if width > height {
+            (
+                max_size,
+                ((height as f32 * max_size as f32 / width as f32) as u32).max(1),
+            )
+        } else {
+            (
+                ((width as f32 * max_size as f32 / height as f32) as u32).max(1),
+                max_size,
+            )
+        };
+
+        let texture_size = wgpu::Extent3d {
+            width: new_width,
+            height: new_height,
+            depth_or_array_layers: 1,
+        };
+
+        let updated_texture = device.create_texture(&TextureDescriptor {
+            label: None,
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8Unorm,
+            usage: TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_SRC
+                | TextureUsages::STORAGE_BINDING,
+        });
+
+        let resize_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Resize shader"),
+            source: ShaderSource::Wgsl(include_str!("shaders/resize.wgsl").into()),
+        });
+
+        let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("Resize pipeline"),
+            layout: None,
+            module: &resize_shader,
+            entry_point: "main",
+        });
+
+        let filter_mode = FilterMode::Linear;
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: None,
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            address_mode_w: AddressMode::ClampToEdge,
+            mag_filter: filter_mode,
+            min_filter: filter_mode,
+            mipmap_filter: filter_mode,
+            ..Default::default()
+        });
+
+        let compute_constants = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Compute constants"),
+            layout: &pipeline.get_bind_group_layout(0),
+            entries: &[BindGroupEntry {
+                binding: 0,
+                resource: BindingResource::Sampler(&sampler),
+            }],
+        });
+
+        let texture_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Texture bind group"),
+            layout: &pipeline.get_bind_group_layout(1),
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(
+                        &self.texture.create_view(&TextureViewDescriptor::default()),
+                    ),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(
+                        &updated_texture.create_view(&TextureViewDescriptor::default()),
+                    ),
+                },
+            ],
+        });
+
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
+
+        {
+            let (dispatch_with, dispatch_height) =
+                compute_work_group_count((texture_size.width, texture_size.height), (16, 16));
+            let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                label: Some("Resize pass"),
+            });
+            compute_pass.set_pipeline(&pipeline);
+            compute_pass.set_bind_group(0, &compute_constants, &[]);
+            compute_pass.set_bind_group(1, &texture_bind_group, &[]);
+            compute_pass.dispatch_workgroups(dispatch_with, dispatch_height, 1);
+        }
+
+        queue.submit(Some(encoder.finish()));
+        Self {
+            texture: updated_texture,
+            dimensions: (new_width, new_height),
+        }
+    }
+
+    fn output_buffer(&self, device: &Device, encoder: &mut CommandEncoder) -> OutputBuffer {
+        let (width, height) = self.dimensions;
+        let padded_bytes_per_row = padded_bytes_per_row(width as u64 * 4) as usize;
+        let unpadded_bytes_per_row = width as usize * 4;
+
+        let output_buffer_size =
+            padded_bytes_per_row as u64 * height as u64 * std::mem::size_of::<u8>() as u64;
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: output_buffer_size,
+            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        encoder.copy_texture_to_buffer(
+            wgpu::ImageCopyTexture {
+                aspect: wgpu::TextureAspect::All,
+                texture: self,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+            },
+            wgpu::ImageCopyBuffer {
+                buffer: &buffer,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: std::num::NonZeroU32::new(padded_bytes_per_row as u32),
+                    rows_per_image: std::num::NonZeroU32::new(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        OutputBuffer {
+            buffer,
+            unpadded_bytes_per_row,
+            padded_bytes_per_row,
+        }
+    }
+
+    fn pull_image(&self, device: &Device, queue: &Queue) -> Result<Image<Vec<[u8; 4]>>> {
+        let (width, height) = self.dimensions;
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
+
+        let output_buffer = self.output_buffer(device, &mut encoder);
+
+        queue.submit(Some(encoder.finish()));
+
+        let buffer_slice = output_buffer.slice(..);
+        let (buffer_sender, buffer_receiver) = channel();
+        buffer_slice.map_async(MapMode::Read, move |v| {
+            buffer_sender.send(v).expect("Couldn't send result");
+        });
+
+        device.poll(wgpu::Maintain::Wait);
+
+        match buffer_receiver.recv() {
+            Ok(Ok(())) => {
+                let padded_data = buffer_slice.get_mapped_range();
+                let mut pixels: Vec<u8> =
+                    vec![0; output_buffer.unpadded_bytes_per_row * height as usize];
+                for (padded, pixels) in padded_data
+                    .chunks_exact(output_buffer.padded_bytes_per_row)
+                    .zip(pixels.chunks_exact_mut(output_buffer.unpadded_bytes_per_row))
+                {
+                    pixels.copy_from_slice(&padded[..output_buffer.unpadded_bytes_per_row]);
+                }
+
+                let result = copied_pixel((width, height), &pixels);
+
+                Ok(result)
+            }
+            Ok(Err(e)) => Err(e.into()),
+            Err(e) => Err(e.into()),
         }
     }
 }
@@ -676,31 +779,14 @@ impl Deref for CentroidsBuffer {
 
 pub fn palette<C: Container>(
     image_processor: &ImageProcessor,
-    k: u32,
+    color_count: u32,
     image: &Image<C>,
+    algo: Algorithm,
 ) -> Result<Vec<[u8; 4]>> {
-    let input_texture = InputTexture::new(&image_processor.device, &image_processor.queue, image);
-
-    let mut colors = operations::extract_palette(
-        &image_processor.device,
-        &image_processor.queue,
-        &input_texture,
-        &ColorSpace::Lab,
-        k,
-        image_processor.query_time,
-    )?
-    .pull_values(
-        &image_processor.device,
-        &image_processor.queue,
-        &ColorSpace::Lab,
-    )?;
-
-    colors.sort_unstable_by(|a, b| {
-        let a: Lab = Srgba::from_raw(a).into_format::<_, f32>().into_color();
-        let b: Lab = Srgba::from_raw(b).into_format::<_, f32>().into_color();
-        a.l.partial_cmp(&b.l).unwrap()
-    });
-    Ok(colors)
+    match algo {
+        Algorithm::Kmeans => kmeans_palette(image_processor, color_count, image),
+        Algorithm::Octree => octree_palette(image_processor, color_count, image),
+    }
 }
 
 pub fn find<C: Container>(
@@ -746,18 +832,25 @@ pub fn reduce<C: Container>(
     image_processor: &ImageProcessor,
     color_count: u32,
     image: &Image<C>,
+    algo: &Algorithm,
     reduce_mode: &ReduceMode,
 ) -> Result<Image<Vec<[u8; 4]>>> {
     let input_texture = InputTexture::new(&image_processor.device, &image_processor.queue, image);
 
-    let centroids_buffer = operations::extract_palette(
-        &image_processor.device,
-        &image_processor.queue,
-        &input_texture,
-        &ColorSpace::Lab,
-        color_count,
-        image_processor.query_time,
-    )?;
+    let centroids_buffer = match algo {
+        Algorithm::Kmeans => operations::extract_palette_kmeans(
+            &image_processor.device,
+            &image_processor.queue,
+            &input_texture,
+            &ColorSpace::Lab,
+            color_count,
+            image_processor.query_time,
+        )?,
+        Algorithm::Octree => {
+            let palette = octree_palette(image_processor, color_count, image)?;
+            CentroidsBuffer::fixed_centroids(&palette, &ColorSpace::Lab, &image_processor.device)
+        }
+    };
 
     match reduce_mode {
         ReduceMode::Replace => operations::find_colors(
@@ -786,4 +879,76 @@ pub fn reduce<C: Container>(
         ),
     }?
     .pull_image(&image_processor.device, &image_processor.queue)
+}
+
+fn kmeans_palette<C: Container>(
+    image_processor: &ImageProcessor,
+    color_count: u32,
+    image: &Image<C>,
+) -> Result<Vec<[u8; 4]>> {
+    let input_texture = InputTexture::new(&image_processor.device, &image_processor.queue, image);
+
+    let mut colors = operations::extract_palette_kmeans(
+        &image_processor.device,
+        &image_processor.queue,
+        &input_texture,
+        &ColorSpace::Lab,
+        color_count,
+        image_processor.query_time,
+    )?
+    .pull_values(
+        &image_processor.device,
+        &image_processor.queue,
+        &ColorSpace::Lab,
+    )?;
+
+    colors.sort_unstable_by(|a, b| {
+        let a: Lab = Srgba::from_raw(a).into_format::<_, f32>().into_color();
+        let b: Lab = Srgba::from_raw(b).into_format::<_, f32>().into_color();
+        a.l.partial_cmp(&b.l).unwrap()
+    });
+    Ok(colors)
+}
+
+fn octree_palette<C: Container>(
+    image_processor: &ImageProcessor,
+    color_count: u32,
+    image: &Image<C>,
+) -> Result<Vec<[u8; 4]>> {
+    const MAX_SIZE: u32 = 128;
+
+    let (width, height) = image.dimensions;
+    let resized = if width > MAX_SIZE || height > MAX_SIZE {
+        let input_texture = InputTexture::new(
+            &image_processor.device,
+            &image_processor.queue,
+            image,
+        )
+        .resized(MAX_SIZE, &image_processor.device, &image_processor.queue);
+        Some(input_texture.pull_image(&image_processor.device, &image_processor.queue)?)
+    } else {
+        None
+    };
+
+    let pixels: &[[u8; 4]] = if let Some(resized) = &resized {
+        &resized.rgba
+    } else {
+        &image.rgba
+    };
+
+    let start = Instant::now();
+    let mut colors = operations::extract_palette_octree(pixels, color_count)?;
+
+    if image_processor.query_time {
+        let duration = start.elapsed();
+        println!("Time elapsed in octree() is: {duration:?}");
+    }
+
+    colors.sort_unstable_by(|a, b| {
+        let a: Lab = Srgba::from_raw(a).into_format::<_, f32>().into_color();
+        let b: Lab = Srgba::from_raw(b).into_format::<_, f32>().into_color();
+        a.l.partial_cmp(&b.l).unwrap()
+    });
+
+    Ok(colors)
 }

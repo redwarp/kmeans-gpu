@@ -3,6 +3,7 @@ use crate::{
         ChooseCentroidModule, ColorConverterModule, ColorReverterModule, FindCentroidModule,
         MixColorsModule, MixMode, Module, PlusPlusInitModule, SwapModule,
     },
+    octree::ColorTree,
     CentroidsBuffer, ColorIndexTexture, ColorSpace, InputTexture, OutputTexture, WorkTexture,
 };
 use anyhow::Result;
@@ -14,7 +15,7 @@ use wgpu::{
     QuerySetDescriptor, QueryType, Queue,
 };
 
-pub(crate) fn extract_palette(
+pub(crate) fn extract_palette_kmeans(
     device: &Device,
     queue: &Queue,
     input_texture: &InputTexture,
@@ -140,9 +141,17 @@ pub(crate) fn extract_palette(
         let b: Lab = Srgba::from_raw(b).into_format::<_, f32>().into_color();
         a.l.partial_cmp(&b.l).unwrap()
     });
-    // Ok(colors)
 
     Ok(centroids_buffer)
+}
+
+pub(crate) fn extract_palette_octree(pixels: &[[u8; 4]], color_count: u32) -> Result<Vec<[u8; 4]>> {
+    let mut tree = ColorTree::new();
+    for pixel in pixels {
+        tree.add_color(pixel);
+    }
+
+    Ok(tree.reduce(color_count as usize))
 }
 
 pub(crate) fn dither_colors(
