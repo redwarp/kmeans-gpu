@@ -99,10 +99,15 @@ impl ColorTree {
             }
         }
         self.nodes.clear();
-        leaves
+
+        let mut palette: Vec<_> = leaves
             .into_iter()
             .map(|node| node.borrow().accumulator.output_color())
-            .collect()
+            .collect();
+        palette.sort();
+        palette.dedup();
+
+        palette
     }
 }
 
@@ -295,8 +300,8 @@ mod tests {
             tree.add_color(pixel);
         }
 
-        let output = tree.reduce(8);
+        let palette = tree.reduce(8);
 
-        println!("Reduced colors: {output:?}");
+        assert_eq!(8, palette.len());
     }
 }
