@@ -25,7 +25,8 @@ fn main() -> Result<()> {
             color_count,
             input,
             output,
-        } => palette_subcommand2(color_count, input, output).block_on(),
+            size,
+        } => palette_subcommand2(color_count, input, output, size).block_on(),
         Commands::Find {
             input,
             output,
@@ -47,6 +48,7 @@ async fn _palette_subcommand(
     color_count: u32,
     input: PathBuf,
     output: Option<PathBuf>,
+    size: u32,
 ) -> Result<()> {
     let image = image::open(&input)?.to_rgba8();
     let image = to_lib_image(&image);
@@ -54,8 +56,8 @@ async fn _palette_subcommand(
     let image_processor = ImageProcessor::new().await?;
     let result = palette(&image_processor, color_count, &image)?;
 
-    let path = palette_file(color_count, &input, &output)?;
-    save_palette(path, &result)?;
+    let path = palette_file(color_count, &input, &output, size)?;
+    save_palette(path, &result, size)?;
 
     let colors = result
         .into_iter()
@@ -72,6 +74,7 @@ async fn palette_subcommand2(
     color_count: u32,
     input: PathBuf,
     output: Option<PathBuf>,
+    size: u32,
 ) -> Result<()> {
     let image = image::open(&input)?.to_rgba8();
     let image = to_lib_image(&image);
@@ -79,8 +82,8 @@ async fn palette_subcommand2(
     let image_processor = ImageProcessor::new().await?;
     let result = octree_palette(&image_processor, color_count, &image)?;
 
-    let path = palette_file(color_count, &input, &output)?;
-    save_palette(path, &result)?;
+    let path = palette_file(color_count, &input, &output, size)?;
+    save_palette(path, &result, size)?;
 
     let colors = result
         .into_iter()
@@ -176,7 +179,7 @@ fn reduce_file(
     }
 }
 
-fn palette_file(k: u32, input: &Path, output: &Option<PathBuf>) -> Result<PathBuf> {
+fn palette_file(k: u32, input: &Path, output: &Option<PathBuf>, size: u32) -> Result<PathBuf> {
     if let Some(output) = output {
         return Ok(output.clone());
     }
@@ -189,7 +192,7 @@ fn palette_file(k: u32, input: &Path, output: &Option<PathBuf>) -> Result<PathBu
         .to_string_lossy();
     let extension = "png";
 
-    let filename = format!("{stem}-palette-c{k}.{extension}",);
+    let filename = format!("{stem}-palette-c{k}-s{size}.{extension}",);
     let output_path = if let Some(parent) = parent {
         parent.join(filename)
     } else {
@@ -236,17 +239,16 @@ fn find_file(
     }
 }
 
-fn save_palette<P>(path: P, palette: &[[u8; 4]]) -> Result<()>
+fn save_palette<P>(path: P, palette: &[[u8; 4]], size: u32) -> Result<()>
 where
     P: AsRef<Path>,
 {
-    let height = 1;
-    let width = palette.len() as u32 * height;
+    let width = palette.len() as u32 * size;
 
-    let mut image_buffer: image::RgbaImage = image::ImageBuffer::new(width, height);
+    let mut image_buffer: image::RgbaImage = image::ImageBuffer::new(width, size);
 
     for (x, _, pixel) in image_buffer.enumerate_pixels_mut() {
-        let index = (x / height) as usize;
+        let index = (x / size) as usize;
         let color = palette[index];
 
         *pixel = image::Rgba(color);

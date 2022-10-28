@@ -23,19 +23,22 @@ pub enum Commands {
         /// Color count of the generated palette
         #[clap(short, long="colorcount", value_parser = validate_k)]
         color_count: u32,
-        /// Input file
+        /// Input image file
         #[clap(short, long, value_parser = validate_filenames)]
         input: PathBuf,
-        /// Optional output file
+        /// Optional output image file
         #[clap(short, long, value_parser)]
         output: Option<PathBuf>,
+        /// Each color will be represented by a square of <SIZE x SIZE>. Between 1 and 60
+        #[clap(short, long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..=60))]
+        size: u32,
     },
     /// Find colors in image that are closest to the replacements, and swap them.
     Find {
-        /// Input file
+        /// Input image file
         #[clap(short, long, value_parser = validate_filenames)]
         input: PathBuf,
-        /// Optional output file
+        /// Optional output image file
         #[clap(short, long, value_parser)]
         output: Option<PathBuf>,
         /// List of RGB replacement colors formatted as "#RRGGBB,#RRGGBB" or path to a palette image
@@ -50,10 +53,10 @@ pub enum Commands {
         /// Color count of the generated palette
         #[clap(short, long="colorcount", value_parser = validate_k)]
         color_count: u32,
-        /// Input file
+        /// Input image file
         #[clap(short, long, value_parser = validate_filenames)]
         input: PathBuf,
-        /// Optional output file
+        /// Optional output image file
         #[clap(short, long, value_parser)]
         output: Option<PathBuf>,
         /// Mix function to apply on the result
@@ -66,6 +69,33 @@ pub enum Commands {
 pub enum Extension {
     Png,
     Jpg,
+}
+
+impl Extension {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Extension::Png => "png",
+            Extension::Jpg => "jpg",
+        }
+    }
+}
+
+impl FromStr for Extension {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "png" => Ok(Extension::Png),
+            "jpg" => Ok(Extension::Jpg),
+            _ => Err(anyhow!("Unsupported extension {s}")),
+        }
+    }
+}
+
+impl Display for Extension {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
+    }
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -97,33 +127,6 @@ impl From<ColorSpace> for k_means_gpu::ColorSpace {
             ColorSpace::Lab => k_means_gpu::ColorSpace::Lab,
             ColorSpace::Rgb => k_means_gpu::ColorSpace::Rgb,
         }
-    }
-}
-
-impl Extension {
-    pub fn name(&self) -> &'static str {
-        match self {
-            Extension::Png => "png",
-            Extension::Jpg => "jpg",
-        }
-    }
-}
-
-impl FromStr for Extension {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "png" => Ok(Extension::Png),
-            "jpg" => Ok(Extension::Jpg),
-            _ => Err(anyhow!("Unsupported extension {s}")),
-        }
-    }
-}
-
-impl Display for Extension {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.name())
     }
 }
 
