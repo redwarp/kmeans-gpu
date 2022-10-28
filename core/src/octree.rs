@@ -62,14 +62,17 @@ impl ColorTree {
     }
 
     pub fn reduce(&mut self, color_count: usize) -> Vec<[u8; 4]> {
+        if color_count == 0 {
+            return vec![];
+        }
+
         let mut leaves: Vec<Rc<RefCell<Node>>> = self
             .nodes
             .iter()
             .filter(|node| node.borrow().accumulator.pixel_count > 0)
             .cloned()
             .collect();
-        leaves.sort_unstable_by(|a, b| a.cmp(b).reverse());
-        leaves.dedup();
+        leaves.sort_by(|a, b| a.cmp(b).reverse());
 
         while leaves.len() > color_count {
             let node = leaves.pop().expect("Len is > 0");
@@ -77,21 +80,25 @@ impl ColorTree {
             let parent_id = node.borrow().parent;
             if let Some(parent_id) = parent_id {
                 let parent = &self.nodes[*parent_id];
+                if let Ok(position) = leaves.binary_search_by(|probe| parent.cmp(probe)) {
+                    leaves.remove(position);
+                }
                 {
                     let mut parent = parent.borrow_mut();
                     parent.accumulator += node.borrow().accumulator;
                     parent.child_count -= 1;
                     parent.children[color_index] = None;
-                }
-                if !leaves.contains(parent) {
-                    leaves.push(parent.clone());
+                    node.borrow_mut().parent = None;
                 }
 
-                leaves.sort_unstable_by(|a, b| a.cmp(b).reverse());
+                if let Err(position) = leaves.binary_search_by(|probe| parent.cmp(probe)) {
+                    leaves.insert(position, parent.clone());
+                }
             }
         }
+        self.nodes.clear();
         leaves
-            .iter()
+            .into_iter()
             .map(|node| node.borrow().accumulator.output_color())
             .collect()
     }
@@ -200,7 +207,7 @@ impl Eq for Node {}
 
 impl PartialOrd for Node {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        if let Some(std::cmp::Ordering::Equal) = self.node_id.partial_cmp(&other.node_id) {
+        if self.eq(other) {
             return Some(std::cmp::Ordering::Equal);
         }
 
