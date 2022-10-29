@@ -1,15 +1,14 @@
 [package]
-name = "k-means-gpu-cli"
-version = "0.1.0"
-edition = "2021"
-authors = ["Benoit Vermont <redwarp@gmail.com>"]
-description = "Command line tool to use the k-means-gpu library"
-readme = "README.md"
-license = "MIT"
-repository = "https://github.com/redwarp/k-means-gpu"
-keywords = ["image", "wgpu", "k-means"]
-categories = ["graphics", "multimedia::images", "command-line-utilities"]
-exclude = ["gfx", ".vscode"]
+name = "color-quantization-gpu-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+readme.workspace = true
+license.workspace = true
+repository.workspace = true
+categories.workspace = true
+keywords = ["image", "wgpu", "k-means", "cli"]
+description = "Command line tool to use the color-quantization-gpu library"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
@@ -23,5 +22,5 @@ clap = { version = "4.0", features = ["cargo", "derive"] }
 log = "0.4"
 env_logger = "0.9"
 regex = "1.6"
-k-means-gpu = { path = "../core" }
+color-quantization-gpu = { path = "../core" }
 bytemuck = "1.12"

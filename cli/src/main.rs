@@ -1,15 +1,16 @@
+use anyhow::{Ok, Result};
+use args::{Cli, Commands, Extension, Palette};
+use clap::Parser;
+use color_quantization_gpu::{
+    find, image::Image, palette, reduce, Algorithm, ImageProcessor, ReduceMode,
+};
+use image::{ImageBuffer, Rgba, RgbaImage};
+use pollster::FutureExt;
 use std::{
     borrow::Cow,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
-
-use anyhow::{Ok, Result};
-use args::{Cli, Commands, Extension, Palette};
-use clap::Parser;
-use image::{ImageBuffer, Rgba, RgbaImage};
-use k_means_gpu::{find, image::Image, palette, reduce, Algorithm, ImageProcessor, ReduceMode};
-use pollster::FutureExt;
 
 mod args;
 
@@ -230,13 +231,13 @@ where
 {
     let width = palette.len() as u32 * size;
 
-    let mut image_buffer: image::RgbaImage = image::ImageBuffer::new(width, size);
+    let mut image_buffer: RgbaImage = image::ImageBuffer::new(width, size);
 
     for (x, _, pixel) in image_buffer.enumerate_pixels_mut() {
         let index = (x / size) as usize;
         let color = palette[index];
 
-        *pixel = image::Rgba(color);
+        *pixel = Rgba(color);
     }
 
     image_buffer.save(path)?;

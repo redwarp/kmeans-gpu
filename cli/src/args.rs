@@ -111,12 +111,12 @@ pub enum ReduceMode {
     Meld,
 }
 
-impl From<ReduceMode> for k_means_gpu::ReduceMode {
+impl From<ReduceMode> for color_quantization_gpu::ReduceMode {
     fn from(reduce_mode: ReduceMode) -> Self {
         match reduce_mode {
-            ReduceMode::Replace => k_means_gpu::ReduceMode::Replace,
-            ReduceMode::Dither => k_means_gpu::ReduceMode::Dither,
-            ReduceMode::Meld => k_means_gpu::ReduceMode::Meld,
+            ReduceMode::Replace => color_quantization_gpu::ReduceMode::Replace,
+            ReduceMode::Dither => color_quantization_gpu::ReduceMode::Dither,
+            ReduceMode::Meld => color_quantization_gpu::ReduceMode::Meld,
         }
     }
 }
@@ -127,11 +127,11 @@ pub enum ColorSpace {
     Rgb,
 }
 
-impl From<ColorSpace> for k_means_gpu::ColorSpace {
+impl From<ColorSpace> for color_quantization_gpu::ColorSpace {
     fn from(color_space: ColorSpace) -> Self {
         match color_space {
-            ColorSpace::Lab => k_means_gpu::ColorSpace::Lab,
-            ColorSpace::Rgb => k_means_gpu::ColorSpace::Rgb,
+            ColorSpace::Lab => color_quantization_gpu::ColorSpace::Lab,
+            ColorSpace::Rgb => color_quantization_gpu::ColorSpace::Rgb,
         }
     }
 }
@@ -142,11 +142,11 @@ pub enum Algorithm {
     Octree,
 }
 
-impl From<Algorithm> for k_means_gpu::Algorithm {
+impl From<Algorithm> for color_quantization_gpu::Algorithm {
     fn from(algo: Algorithm) -> Self {
         match algo {
-            Algorithm::Kmeans => k_means_gpu::Algorithm::Kmeans,
-            Algorithm::Octree => k_means_gpu::Algorithm::Octree,
+            Algorithm::Kmeans => color_quantization_gpu::Algorithm::Kmeans,
+            Algorithm::Octree => color_quantization_gpu::Algorithm::Octree,
         }
     }
 }

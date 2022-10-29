@@ -209,6 +209,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "color-quantization-gpu"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "log",
+ "palette",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
+name = "color-quantization-gpu-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "clap",
+ "color-quantization-gpu",
+ "env_logger",
+ "image",
+ "log",
+ "pollster",
+ "regex",
+]
+
+[[package]]
 name = "color_quant"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -463,33 +490,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "k-means-gpu"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytemuck",
- "log",
- "palette",
- "pollster",
- "wgpu",
-]
-
-[[package]]
-name = "k-means-gpu-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytemuck",
- "clap",
- "env_logger",
- "image",
- "k-means-gpu",
- "log",
- "pollster",
- "regex",
-]
-
-[[package]]
 name = "khronos-egl"
 version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -644,9 +644,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.15.0"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e82dad04139b71a90c080c8463fe0dc7902db5192d939bd0950f074d014339e1"
+checksum = "86f0b0d4bf799edbc74508c1e8bf170ff5f41238e5f8225603ca7caaae2b7860"
 
 [[package]]
 name = "os_str_bytes"

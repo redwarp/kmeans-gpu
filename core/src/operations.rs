@@ -1,3 +1,12 @@
+use anyhow::Result;
+use palette::{IntoColor, Lab, Pixel, Srgba};
+use std::sync::mpsc::channel;
+use wgpu::{
+    util::{BufferInitDescriptor, DeviceExt},
+    BufferUsages, CommandEncoderDescriptor, ComputePassDescriptor, Device, MapMode,
+    QuerySetDescriptor, QueryType, Queue,
+};
+
 use crate::{
     modules::{
         ChooseCentroidModule, ColorConverterModule, ColorReverterModule, FindCentroidModule,
@@ -6,14 +15,6 @@ use crate::{
     octree::ColorTree,
     structures::{ColorIndexTexture, OutputTexture, WorkTexture},
     CentroidsBuffer, ColorSpace, InputTexture,
-};
-use anyhow::Result;
-use palette::{IntoColor, Lab, Pixel, Srgba};
-use std::sync::mpsc::channel;
-use wgpu::{
-    util::{BufferInitDescriptor, DeviceExt},
-    BufferUsages, CommandEncoderDescriptor, ComputePassDescriptor, Device, MapMode,
-    QuerySetDescriptor, QueryType, Queue,
 };
 
 pub(crate) fn extract_palette_kmeans(
