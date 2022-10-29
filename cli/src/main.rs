@@ -58,7 +58,7 @@ async fn palette_subcommand2(
 
     let result = palette(&image_processor, color_count, &image, algo)?;
 
-    let path = palette_file(color_count, &input, &output, &algo, size)?;
+    let path = palette_file_path(color_count, &input, &output, &algo, size)?;
     save_palette(path, &result, size)?;
 
     let colors = result
@@ -89,7 +89,7 @@ async fn find_subcommand(
     if let Some(output_image) =
         ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, result.into_raw_pixels())
     {
-        let output_file = find_file(&reduce_mode, &output, &input, &None)?;
+        let output_file = find_file_path(&reduce_mode, &output, &input, &None)?;
         output_image.save(output_file)?;
     }
 
@@ -114,14 +114,15 @@ async fn reduce_subcommand(
     if let Some(output_image) =
         ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, result.into_raw_pixels())
     {
-        let output_file = reduce_file(color_count, &algo, &reduce_mode, &output, &input, &None)?;
+        let output_file =
+            reduce_file_path(color_count, &algo, &reduce_mode, &output, &input, &None)?;
         output_image.save(output_file)?;
     }
 
     Ok(())
 }
 
-fn reduce_file(
+fn reduce_file_path(
     color_count: u32,
     algo: &Algorithm,
     reduce_mode: &ReduceMode,
@@ -157,7 +158,7 @@ fn reduce_file(
     }
 }
 
-fn palette_file(
+fn palette_file_path(
     k: u32,
     input: &Path,
     output: &Option<PathBuf>,
@@ -186,7 +187,7 @@ fn palette_file(
     Ok(output_path)
 }
 
-fn find_file(
+fn find_file_path(
     reduce_mode: &ReduceMode,
     output: &Option<PathBuf>,
     input: &Path,

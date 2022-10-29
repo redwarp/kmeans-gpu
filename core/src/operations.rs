@@ -4,7 +4,8 @@ use crate::{
         MixColorsModule, MixMode, Module, PlusPlusInitModule, SwapModule,
     },
     octree::ColorTree,
-    CentroidsBuffer, ColorIndexTexture, ColorSpace, InputTexture, OutputTexture, WorkTexture,
+    structures::{ColorIndexTexture, OutputTexture, WorkTexture},
+    CentroidsBuffer, ColorSpace, InputTexture,
 };
 use anyhow::Result;
 use palette::{IntoColor, Lab, Pixel, Srgba};

@@ -12,8 +12,9 @@ use wgpu::{
 };
 
 use crate::{
-    utils::compute_work_group_count, CentroidsBuffer, ColorIndexTexture, ColorSpace, InputTexture,
-    OutputTexture, WorkTexture,
+    structures::{ColorIndexTexture, OutputTexture, WorkTexture},
+    utils::compute_work_group_count,
+    CentroidsBuffer, ColorSpace, InputTexture,
 };
 
 pub(crate) trait Module {
