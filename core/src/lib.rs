@@ -27,7 +27,7 @@ impl ImageProcessor {
     /// to use in future operations.
     /// ```rust,no_run
     /// use pollster::FutureExt;
-    /// use k_means_gpu::ImageProcessor;
+    /// use color_quantization_gpu::ImageProcessor;
     ///
     /// let image_processor = ImageProcessor::new().block_on();
     /// ```
