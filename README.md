@@ -28,6 +28,14 @@ cargo run --release -- reduce -i .\gfx\tokyo.png -c 8 -m dither
 
 ![Tokyo with k=8](gfx/tokyo-reduce-c8-kmeans-dither.png)
 
+### Output the palette:
+
+```sh
+cargo run --release -- palette -i .\gfx\tokyo.png -c 8 -s 40
+```
+
+![Tokyo palette with c=8](gfx/tokyo-palette-c8-kmeans-s40.png)
+
 ### Find colors and use them as replacement
 
 ```sh
@@ -51,14 +59,6 @@ cargo run --release -- find -i .\gfx\tokyo.png -p .\gfx\apollo-1x.png -m dither
 ```
 
 ![Tokyo with looked up colors](gfx/tokyo-find-dither-apollo.png)
-
-### Output the palette:
-
-```sh
-cargo run --release -- palette -i .\gfx\tokyo.png -c 8 -s 40
-```
-
-![Tokyo palette with c=8](gfx/tokyo-palette-c8-kmeans-s40.png)
 
 ## Sources
 

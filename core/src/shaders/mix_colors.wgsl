@@ -47,8 +47,24 @@ fn two_closest_colors(color: vec4<f32>) -> array<vec4<f32>, 2> {
 
 fn dither(color: vec4<f32>, coords: vec2<i32>) -> vec4<f32> {
     // Based on https://en.wikipedia.org/wiki/Ordered_dithering
-    // This threshold is not the best as it only works in LAB color space.
-    let threshold = vec3<f32>(100.0 / sqrt(f32(centroids.count)), 0.0, 0.0);
+    // Maybe this threshold should be computed by a different shader first?
+    var color_a: vec3<f32> = centroids.data[0].rgb;
+    var color_b: vec3<f32> = centroids.data[1].rgb;
+    var distance_a_b = distance(color_a, color_b);
+    for (var i: u32 = 2u; i < centroids.count; i = i + 1u) {
+        let distance_a = distance(centroids.data[i].rgb, color_a);
+        let distance_b = distance(centroids.data[i].rgb, color_b);
+
+        if(distance_a > distance_b && distance_a > distance_a_b) {
+            distance_a_b = distance_a;
+            color_b = centroids.data[i].rgb;
+        } else if (distance_b > distance_a_b) {
+            distance_a_b = distance_b;
+            color_a = centroids.data[i].rgb;
+        }
+    }
+    let threshold = vec3<f32>(distance_a_b / sqrt(f32(centroids.count)));
+
     let index_value = index_value(coords) - 0.5;
 
     let adjusted = color.rgb + threshold * index_value;
@@ -80,6 +96,12 @@ fn main_dither(
     let coords = vec2<i32>(global_id.xy);
 
     if(coords.x >= dimensions.x || coords.y >= dimensions.y) {
+        return;
+    }
+    
+    if (centroids.count == 1u) {
+        // Only one color, so nothing to meld.
+        textureStore(output_texture, coords, centroids.data[0]);
         return;
     }
 
