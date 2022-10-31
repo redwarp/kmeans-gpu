@@ -1,6 +1,13 @@
 @group(0) @binding(0) var input_texture : texture_2d<f32>;
 @group(0) @binding(1) var output_texture : texture_storage_2d<rgba32float, write>;
 
+// sRGB factors, see http://www.brucelindbloom.com/
+let RGB_TO_XYZ_MATRIX = mat3x3<f32>(
+    vec3<f32>(0.4124564, 0.2126729, 0.0193339),
+    vec3<f32>(0.3575761, 0.7151522, 0.1191920),
+    vec3<f32>(0.1804375, 0.0721750, 0.9503041)
+);
+
 fn rgb_to_xyz(rgb: vec4<f32>) -> vec4<f32> {
     var r = rgb.r;
     var g = rgb.g;
@@ -25,16 +32,14 @@ fn rgb_to_xyz(rgb: vec4<f32>) -> vec4<f32> {
     g = g * 100.0;
     b = b * 100.0;
 
-    var x = r * 0.4124 + g * 0.3576 + b * 0.1805;
-    var y = r * 0.2126 + g * 0.7152 + b * 0.0722;
-    var z = r * 0.0193 + g * 0.1192 + b * 0.9505;
-    return vec4<f32>(x, y, z, 1.0);
+    var xyz = RGB_TO_XYZ_MATRIX * vec3<f32>(r, g, b);
+    return vec4<f32>(xyz, 1.0);
 }
 
 fn xyz_to_lab(xyz: vec4<f32>) -> vec4<f32> {
-    var x = xyz.x / 95.047;
-    var y = xyz.y / 100.000;
-    var z = xyz.z / 108.883;
+    var x = xyz.x / 95.0489;
+    var y = xyz.y / 100.0;
+    var z = xyz.z / 108.8840;
 
     if (x > 0.008856) {
         x = pow(x, 1.0/3.0);
