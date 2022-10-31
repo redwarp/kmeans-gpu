@@ -115,8 +115,7 @@ async fn reduce_subcommand(
     if let Some(output_image) =
         ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, result.into_raw_pixels())
     {
-        let output_file =
-            reduce_file_path(color_count, &algo, &reduce_mode, &output, &input, &None)?;
+        let output_file = reduce_file_path(color_count, &algo, &reduce_mode, &output, &input)?;
         output_image.save(output_file)?;
     }
 
@@ -129,7 +128,6 @@ fn reduce_file_path(
     reduce_mode: &ReduceMode,
     output: &Option<PathBuf>,
     input: &Path,
-    extension: &Option<Extension>,
 ) -> Result<PathBuf> {
     if let Some(output) = output {
         Ok(output.clone())
@@ -139,14 +137,7 @@ fn reduce_file_path(
             .file_stem()
             .expect("Expecting .jpg or .png files")
             .to_string_lossy();
-        let extension = if let Some(extension) = extension {
-            Cow::Borrowed(extension.name())
-        } else {
-            input
-                .extension()
-                .expect("Expecting .jpg or .png files")
-                .to_string_lossy()
-        };
+        let extension = Cow::Borrowed("png");
 
         let filename = format!("{stem}-reduce-c{color_count}-{algo}-{reduce_mode}.{extension}");
         let output_path = if let Some(parent) = parent {
