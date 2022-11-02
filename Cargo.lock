@@ -217,6 +217,7 @@ dependencies = [
  "log",
  "palette",
  "pollster",
+ "preprocessor",
  "wgpu",
 ]
 
@@ -702,6 +703,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "pathdiff"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8835116a5c179084a830efb3adc117ab007512b535bc1a21c991d3b32a6b44dd"
+
+[[package]]
 name = "phf"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -766,6 +773,16 @@ name = "pollster"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5da3b0203fd7ee5720aa0b5e790b591aa5d3f41c3ed2c34a3a393382198af2f7"
+
+[[package]]
+name = "preprocessor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "naga",
+ "pathdiff",
+ "regex",
+]
 
 [[package]]
 name = "proc-macro-error"

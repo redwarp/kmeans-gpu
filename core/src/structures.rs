@@ -13,6 +13,7 @@ use wgpu::{
 
 use crate::{
     image::{copied_pixel, Container, Image},
+    modules::include_shader,
     utils::{compute_work_group_count, padded_bytes_per_row},
     ColorSpace,
 };
@@ -104,7 +105,7 @@ impl InputTexture {
 
         let resize_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Resize shader"),
-            source: ShaderSource::Wgsl(include_str!("shaders/resize.wgsl").into()),
+            source: ShaderSource::Wgsl(include_shader!("shaders/resize.wgsl").into()),
         });
 
         let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
