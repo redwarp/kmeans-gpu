@@ -187,7 +187,7 @@ fn pick() {
 
         centroids.data[k] = new_centroid;
 
-        atomicStore(&convergence[k], u32(distance(new_centroid, previous_centroid) < settings.convergence));
+        atomicStore(&convergence[k], u32(distance(new_centroid.rgb, previous_centroid.rgb) < settings.convergence));
     } else {
         atomicStore(&convergence[k], 0u);
     }
