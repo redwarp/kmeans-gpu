@@ -1,8 +1,6 @@
 // Let's do some order dithering.
 // https://en.wikipedia.org/wiki/Ordered_dithering
 
-// #include functions/delta_e.wgsl
-
 struct Centroids {
     count: u32,
     data: array<vec4<f32>>,
@@ -17,6 +15,8 @@ let index_matrix: array<i32, 16> = array<i32, 16>(0,  8,  2,  10,
                                                   12, 4,  14, 6,
                                                   3,  11, 1,  9,
                                                   15, 7,  13, 5);
+
+// #include functions/delta_e.wgsl
 
 fn index_value(coords: vec2<i32>) -> f32 {
     let x = coords.x % 4;
