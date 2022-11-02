@@ -1,0 +1,16 @@
+[package]
+name = "preprocessor"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+readme.workspace = true
+license.workspace = true
+repository.workspace = true
+categories.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+regex = "1.6"
+pathdiff = "0.2"
+anyhow = "1.0"

@@ -17,6 +17,12 @@ use crate::{
     CentroidsBuffer, ColorSpace, InputTexture,
 };
 
+macro_rules! include_shader {
+    ($file:expr $(,)?) => {
+        include_str!(concat!(env!("OUT_DIR"), "/", $file))
+    };
+}
+
 pub(crate) trait Module {
     fn dispatch<'a>(&'a self, compute_pass: &mut ComputePass<'a>);
 }
@@ -1304,7 +1310,7 @@ impl MixColorsModule {
     ) -> Self {
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Mix colors shader"),
-            source: ShaderSource::Wgsl(include_str!("shaders/mix_colors.wgsl").into()),
+            source: ShaderSource::Wgsl(include_shader!("shaders/mix_colors.wgsl").into()),
         });
 
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
