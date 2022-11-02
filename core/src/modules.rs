@@ -22,6 +22,7 @@ macro_rules! include_shader {
         include_str!(concat!(env!("OUT_DIR"), "/", $file))
     };
 }
+pub(crate) use include_shader;
 
 pub(crate) trait Module {
     fn dispatch<'a>(&'a self, compute_pass: &mut ComputePass<'a>);
@@ -45,8 +46,8 @@ impl ColorConverterModule {
             label: Some("Convert color shader"),
             source: ShaderSource::Wgsl(
                 match color_space {
-                    ColorSpace::Lab => include_str!("shaders/converters/rgb_to_lab.wgsl"),
-                    ColorSpace::Rgb => include_str!("shaders/converters/rgb8u_to_rgb32f.wgsl"),
+                    ColorSpace::Lab => include_shader!("shaders/converters/rgb_to_lab.wgsl"),
+                    ColorSpace::Rgb => include_shader!("shaders/converters/rgb8u_to_rgb32f.wgsl"),
                 }
                 .into(),
             ),
@@ -147,8 +148,8 @@ impl ColorReverterModule {
             label: Some("Revert color shader"),
             source: ShaderSource::Wgsl(
                 match color_space {
-                    ColorSpace::Lab => include_str!("shaders/converters/lab_to_rgb.wgsl"),
-                    ColorSpace::Rgb => include_str!("shaders/converters/rgb32f_to_rgb8u.wgsl"),
+                    ColorSpace::Lab => include_shader!("shaders/converters/lab_to_rgb.wgsl"),
+                    ColorSpace::Rgb => include_shader!("shaders/converters/rgb32f_to_rgb8u.wgsl"),
                 }
                 .into(),
             ),
@@ -256,7 +257,7 @@ impl SwapModule {
     ) -> Self {
         let swap_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Swap colors shader"),
-            source: ShaderSource::Wgsl(include_str!("shaders/swap.wgsl").into()),
+            source: ShaderSource::Wgsl(include_shader!("shaders/swap.wgsl").into()),
         });
 
         let swap_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -355,7 +356,7 @@ impl FindCentroidModule {
     ) -> Self {
         let find_centroid_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Find centroid shader"),
-            source: ShaderSource::Wgsl(include_str!("shaders/find_centroid.wgsl").into()),
+            source: ShaderSource::Wgsl(include_shader!("shaders/find_centroid.wgsl").into()),
         });
 
         let find_centroid_bind_group_layout =
@@ -484,7 +485,7 @@ impl<'a> ChooseCentroidModule<'a> {
         const N_SEQ: u32 = 20;
         let choose_centroid_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Choose centroid shader"),
-            source: ShaderSource::Wgsl(include_str!("shaders/choose_centroid.wgsl").into()),
+            source: ShaderSource::Wgsl(include_shader!("shaders/choose_centroid.wgsl").into()),
         });
 
         let choose_centroid_bind_group_0_layout =
@@ -953,7 +954,7 @@ impl<'a> PlusPlusInitModule<'a> {
         let distance_map_texture = DistanceMapTexture::new(device, self.image_dimensions);
         let choose_centroid_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Plus plus init shader"),
-            source: ShaderSource::Wgsl(include_str!("shaders/plus_plus_init.wgsl").into()),
+            source: ShaderSource::Wgsl(include_shader!("shaders/plus_plus_init.wgsl").into()),
         });
 
         let choose_centroid_bind_group_layout =
@@ -1171,7 +1172,7 @@ impl<'a> PlusPlusInitModule<'a> {
 
         let calc_diff_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Calc diff shader"),
-            source: ShaderSource::Wgsl(include_str!("shaders/kmeans++_calc_diff.wgsl").into()),
+            source: ShaderSource::Wgsl(include_shader!("shaders/kmeans++_calc_diff.wgsl").into()),
         });
 
         let calc_diff_bind_group = device.create_bind_group(&BindGroupDescriptor {

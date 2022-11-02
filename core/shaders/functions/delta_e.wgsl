@@ -11,7 +11,6 @@ fn distance_cie94(one: vec3<f32>, second: vec3<f32>) -> f32{
     let dCab = C1 - C2;
 
     var dHab = (da * da) + (db * db) - (dCab * dCab);
-    // var dHab = pow(distance(one, second), 2.0) - dL * dL - dCab * dCab;
     if (dHab < 0.0) {
         dHab = 0.0;
     } else {
