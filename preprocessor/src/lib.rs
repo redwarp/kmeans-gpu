@@ -21,17 +21,10 @@ impl PreProcessor {
         }
     }
 
-    pub fn preprocess_shaders(&self, out_dir: &Path) -> anyhow::Result<()> {
-        let log_file = Path::new(out_dir).join("log.txt");
-        let mut log = String::new();
-
-        log += &format!(
-            "Shader folder: {path}\n",
-            path = self.shaders.to_string_lossy()
-        );
-
+    pub fn preprocess_shaders(&self, out_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
         let wgsl_extension = OsStr::new("wgsl").to_owned();
 
+        let mut output_files = vec![];
         let mut processed = vec![];
         for wgsl_file in list_files(&self.shaders)?.into_iter().filter(|path| {
             if let Some(extension) = path.extension() {
@@ -41,18 +34,14 @@ impl PreProcessor {
             }
             false
         }) {
-            log += &wgsl_file.to_string_lossy();
-            log += "\n";
-            self.process_file(&wgsl_file, out_dir)?;
+            output_files.push(self.process_file(&wgsl_file, out_dir)?);
             processed.push(wgsl_file);
         }
 
-        fs::write(&log_file, &log)?;
-
-        Ok(())
+        Ok(output_files)
     }
 
-    fn process_file(&self, wgsl_file: &Path, into: &Path) -> anyhow::Result<()> {
+    fn process_file(&self, wgsl_file: &Path, into: &Path) -> anyhow::Result<PathBuf> {
         let path_diff =
             pathdiff::diff_paths(wgsl_file, &self.shaders).expect("Shader contained folder");
 
@@ -69,7 +58,7 @@ impl PreProcessor {
 
         println!("Processed {file}", file = path_diff.to_string_lossy());
 
-        Ok(())
+        Ok(into)
     }
 
     fn expanded_content(
@@ -113,7 +102,7 @@ impl PreProcessor {
     }
 }
 
-pub fn preprocess_shaders(shaders: &Path, out_dir: &Path) -> anyhow::Result<()> {
+pub fn preprocess_shaders(shaders: &Path, out_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
     let preprocessor = PreProcessor::new(shaders);
     preprocessor.preprocess_shaders(out_dir)
 }
