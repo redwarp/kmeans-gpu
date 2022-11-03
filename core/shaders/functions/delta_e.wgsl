@@ -1,5 +1,4 @@
 fn distance_cie94(one: vec3<f32>, second: vec3<f32>) -> f32{
-    let kL = 1.0;
     let K1 = 0.045;
     let K2 = 0.015;
     let dL = one.r - second.r;
@@ -24,7 +23,7 @@ fn distance_cie94(one: vec3<f32>, second: vec3<f32>) -> f32{
     let SC = 1.0 + K1 * C1;
     let SH = 1.0 + K2 * C1;
 
-    let i = pow(dL/(kL * SL), 2.0) + pow(dCab/(kC * SC), 2.0) + pow(dHab/(kH * SH), 2.0);
+    let i = pow(dL/SL, 2.0) + pow(dCab/SC, 2.0) + pow(dHab/SH, 2.0);
     if (i < 0.0) {
         return 0.0;
     } else {
