@@ -68,6 +68,8 @@ fn atomicLoadAggregator(index: u32) -> ColorAggregator {
     return value;
 }
 
+// #include functions/delta_e.wgsl
+
 @compute
 @workgroup_size(256)
 fn main(
@@ -187,7 +189,7 @@ fn pick() {
 
         centroids.data[k] = new_centroid;
 
-        atomicStore(&convergence[k], u32(distance(new_centroid.rgb, previous_centroid.rgb) < settings.convergence));
+        atomicStore(&convergence[k], u32(distance_cie2000(new_centroid.rgb, previous_centroid.rgb) < settings.convergence));
     } else {
         atomicStore(&convergence[k], 0u);
     }

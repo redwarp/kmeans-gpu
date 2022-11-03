@@ -10,6 +10,8 @@ struct Centroids {
 let max_int : u32 = 4294967295u;
 let max_f32: f32 = 100000.0;
 
+// #include functions/delta_e.wgsl
+
 @compute
 @workgroup_size(16, 16)
 fn main(
@@ -30,7 +32,7 @@ fn main(
     for(var index: u32 = 0u; index < centroids.count; index = index + 1u){
         let centroid_components : vec3<f32> = centroids.data[index].rgb;
 
-        let distance: f32 = distance(pixel, centroid_components);
+        let distance: f32 = distance_cie2000(pixel, centroid_components);
 
         if (distance < min_distance) {            
             min_distance = distance;
