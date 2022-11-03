@@ -194,7 +194,7 @@ fn validate_palette(s: &str) -> Result<Palette> {
 }
 
 fn parse_palette(path: &PathBuf) -> Result<Palette> {
-    let image = image::open(&path)?.to_rgba8();
+    let image = image::open(path)?.to_rgba8();
     let (width, height) = image.dimensions();
     let pixel_count = width as usize * height as usize;
 

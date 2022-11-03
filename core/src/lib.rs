@@ -11,6 +11,8 @@ use wgpu::{
 mod modules;
 mod octree;
 mod operations;
+#[cfg(test)]
+mod shader_tests;
 mod structures;
 mod utils;
 

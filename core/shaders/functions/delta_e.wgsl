@@ -36,17 +36,17 @@ fn distance_cie2000(lab1: vec3<f32>, lab2: vec3<f32>) -> f32 {
     let k_C = 1.0;
     let k_H = 1.0;
 
-    let deg360InRad = 6.283185;
-    let deg180InRad = 3.141592;
+    let deg360InRad = radians(360.0);
+    let deg180InRad = radians(180.0);
     let pow25To7 = 6103515625.0;
 
-	let C1 = sqrt((lab1.r * lab1.r) + (lab1.b * lab1.b));
-	let C2 = sqrt((lab2.r * lab2.r) + (lab2.b * lab2.b));
+	let C1 = sqrt((lab1.g * lab1.g) + (lab1.b * lab1.b));
+	let C2 = sqrt((lab2.g * lab2.g) + (lab2.b * lab2.b));
     let barC = (C1 + C2) / 2.0;
     let G = 0.5 * (1.0 - sqrt(pow(barC, 7.0) / (pow(barC, 7.0) + pow25To7)));
 
-    let a1Prime = (1.0 + G) * lab1.r;
-    let a2Prime = (1.0 + G) * lab2.r;
+    let a1Prime = (1.0 + G) * lab1.g;
+    let a2Prime = (1.0 + G) * lab2.g;
 	let CPrime1 = sqrt((a1Prime * a1Prime) + (lab1.b * lab1.b));
 	let CPrime2 = sqrt((a2Prime * a2Prime) + (lab2.b * lab2.b));
     var hPrime1: f32 = 0.0;
@@ -78,9 +78,9 @@ fn distance_cie2000(lab1: vec3<f32>, lab2: vec3<f32>) -> f32 {
     } else {
         deltahPrime = hPrime2 - hPrime1;
         if (deltahPrime < -deg180InRad) {
-            deltahPrime+= deg360InRad;
+            deltahPrime += deg360InRad;
         } else if (deltahPrime > deg180InRad) {
-            deltahPrime -= deg180InRad;
+            deltahPrime -= deg360InRad;
         }
     }
     let deltaHPrime = 2.0 * sqrt(CPrimeProduct) * sin(deltahPrime/2.0);
@@ -109,7 +109,7 @@ fn distance_cie2000(lab1: vec3<f32>, lab2: vec3<f32>) -> f32 {
     let T = 1.0 - (0.17 * cos(barhPrime - radians(30.0)))
         + (0.24 * cos(2.0 * barhPrime))
         + (0.32 * cos((3.0 * barhPrime) + radians(6.0)))
-        + (0.20 * cos((4.0 * barhPrime) - radians(63.0)));
+        - (0.20 * cos((4.0 * barhPrime) - radians(63.0)));
 
     let deltaTheta = radians(30.0) * exp(-pow((barhPrime - radians(275.0))/radians(25.0), 2.0));
 
