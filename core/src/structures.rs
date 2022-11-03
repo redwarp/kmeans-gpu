@@ -18,7 +18,7 @@ use crate::{
     ColorSpace,
 };
 
-const MAX_IMAGE_DIMENSION: u32 = 512;
+const MAX_IMAGE_DIMENSION: u32 = 256;
 
 pub(crate) struct InputTexture {
     pub texture: Texture,
