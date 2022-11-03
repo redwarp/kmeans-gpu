@@ -159,7 +159,7 @@ fn test_delta_e_cie94() {
 
     let delta_e = delta_e_cie94([255, 0, 0].to_lab(), [255, 128, 0].to_lab());
 
-    assert!((delta_e - 19.094658).abs() < 0.001);
+    assert!((delta_e - 19.094658).abs() < 0.01);
 }
 
 #[test]
@@ -178,11 +178,11 @@ fn test_delta_e_cie2000() {
 
     let delta_e_0 = delta_e_cie2000(lab1, lab2);
 
-    assert!((delta_e_0 - 2.0424595).abs() < 0.001);
+    assert!((delta_e_0 - 2.0424595).abs() < 0.01);
 
     let delta_e_1 = delta_e_cie2000([255, 0, 0].to_lab(), [255, 128, 0].to_lab());
 
-    assert!((delta_e_1 - 21.164806).abs() < 0.001);
+    assert!((delta_e_1 - 21.164806).abs() < 0.01);
 }
 
 trait ToLab {
