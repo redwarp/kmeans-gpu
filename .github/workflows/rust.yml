@@ -18,7 +18,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: install rust stable
+      - name: Install rust stable
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
@@ -26,8 +26,7 @@ jobs:
           override: true
           components: llvm-tools-preview
 
-      - name: install swiftshader
-        if: matrix.os == 'ubuntu-22.04'
+      - name: Install swiftshader
         shell: bash
         run: |
           set -e
@@ -36,7 +35,7 @@ jobs:
           curl -LsSf https://github.com/gfx-rs/ci-build/releases/latest/download/swiftshader-linux-x86_64.tar.xz | tar -xf - -C swiftshader
           echo "LD_LIBRARY_PATH=$PWD/swiftshader" >> $GITHUB_ENV
 
-      - name: install llvmpipe, vulkan sdk
+      - name: Install llvmpipe, vulkan sdk
         shell: bash
         run: |
           set -e
