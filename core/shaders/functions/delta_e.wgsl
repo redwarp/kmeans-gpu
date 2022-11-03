@@ -9,12 +9,7 @@ fn distance_cie94(one: vec3<f32>, second: vec3<f32>) -> f32{
     let C2 = sqrt(second.g * second.g + second.b * second.b);
     let dCab = C1 - C2;
 
-    var dHab = (da * da) + (db * db) - (dCab * dCab);
-    if (dHab < 0.0) {
-        dHab = 0.0;
-    } else {
-        dHab = sqrt(dHab);
-    }
+    let dHab = sqrt(max((da * da) + (db * db) - (dCab * dCab), 0.0));
 
     let kC = 1.0;
     let kH = 1.0;
@@ -23,12 +18,7 @@ fn distance_cie94(one: vec3<f32>, second: vec3<f32>) -> f32{
     let SC = 1.0 + K1 * C1;
     let SH = 1.0 + K2 * C1;
 
-    let i = pow(dL/SL, 2.0) + pow(dCab/SC, 2.0) + pow(dHab/SH, 2.0);
-    if (i < 0.0) {
-        return 0.0;
-    } else {
-        return sqrt(i);
-    }
+    return sqrt(max(pow(dL/SL, 2.0) + pow(dCab/SC, 2.0) + pow(dHab/SH, 2.0), 0.0));
 }
 
 fn distance_cie2000(lab1: vec3<f32>, lab2: vec3<f32>) -> f32 {
