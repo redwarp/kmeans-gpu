@@ -33,11 +33,11 @@ fn two_closest_colors(color: vec4<f32>) -> array<vec4<f32>, 2> {
 
     for (var i: u32 = 0u; i < centroids.count; i = i + 1u) {
         let temp = centroids.data[i];
-        let temp_distance = distance_cie2000(color.rgb, temp.rgb);
-        if (temp_distance < distance_cie2000(color.rgb, closest.rgb)){
+        let temp_distance = distance_cie94(color.rgb, temp.rgb);
+        if (temp_distance < distance_cie94(color.rgb, closest.rgb)){
             second_closest = closest;
             closest = temp;
-        } else if (temp_distance < distance_cie2000(color.rgb, second_closest.rgb)){
+        } else if (temp_distance < distance_cie94(color.rgb, second_closest.rgb)){
             second_closest = temp;
         }
     }
@@ -52,10 +52,10 @@ fn dither(color: vec4<f32>, coords: vec2<i32>) -> vec4<f32> {
     // Maybe this threshold should be computed by a different shader first?
     var color_a: vec3<f32> = centroids.data[0].rgb;
     var color_b: vec3<f32> = centroids.data[1].rgb;
-    var distance_a_b = distance_cie2000(color_a, color_b);
+    var distance_a_b = distance_cie94(color_a, color_b);
     for (var i: u32 = 2u; i < centroids.count; i = i + 1u) {
-        let distance_a = distance_cie2000(centroids.data[i].rgb, color_a);
-        let distance_b = distance_cie2000(centroids.data[i].rgb, color_b);
+        let distance_a = distance_cie94(centroids.data[i].rgb, color_a);
+        let distance_b = distance_cie94(centroids.data[i].rgb, color_b);
 
         if(distance_a > distance_b && distance_a > distance_a_b) {
             distance_a_b = distance_a;
@@ -74,8 +74,8 @@ fn dither(color: vec4<f32>, coords: vec2<i32>) -> vec4<f32> {
     var closest = vec3<f32>(10000.0);
     for (var i: u32 = 0u; i < centroids.count; i = i + 1u) {
         let temp = centroids.data[i].rgb;
-        let temp_distance = distance_cie2000(adjusted, temp);
-        if (temp_distance < distance_cie2000(adjusted, closest)){
+        let temp_distance = distance_cie94(adjusted, temp);
+        if (temp_distance < distance_cie94(adjusted, closest)){
             closest = temp;
         }
     }
@@ -84,7 +84,7 @@ fn dither(color: vec4<f32>, coords: vec2<i32>) -> vec4<f32> {
 
 fn meld(color: vec4<f32>, coords: vec2<i32>) -> vec4<f32> {
     let closest_colors = two_closest_colors(color);
-    let factor = distance_cie2000(color.rgb, closest_colors[1].rgb) / distance_cie2000(closest_colors[0].rgb, closest_colors[1].rgb);
+    let factor = distance_cie94(color.rgb, closest_colors[1].rgb) / distance_cie94(closest_colors[0].rgb, closest_colors[1].rgb);
 
     return factor * closest_colors[0] + (1.0 - factor) * closest_colors[1];
 }

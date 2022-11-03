@@ -26,7 +26,7 @@ fn main(
     let color = textureLoad(pixels, coords, 0).rgb;
     var min_distance: f32 = 1000000.0;
     for (var k: u32 = 0u; k < k_index; k = k + 1u) {
-        let distance_to_centroid = distance_cie2000(color, centroids.data[k].rgb);
+        let distance_to_centroid = distance_cie94(color, centroids.data[k].rgb);
         min_distance = min(min_distance, distance_to_centroid);
     }
 

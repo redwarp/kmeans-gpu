@@ -32,7 +32,7 @@ fn main(
     for(var index: u32 = 0u; index < centroids.count; index = index + 1u){
         let centroid_components : vec3<f32> = centroids.data[index].rgb;
 
-        let distance: f32 = distance_cie2000(pixel, centroid_components);
+        let distance: f32 = distance_cie94(pixel, centroid_components);
 
         if (distance < min_distance) {            
             min_distance = distance;
