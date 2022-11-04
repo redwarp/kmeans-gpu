@@ -44,6 +44,8 @@ fn vec3x2_as_input_f32_as_output(
             });
 
         let mut input_data: Vec<u8> = vec![];
+        // vec<f32> are 16 byte aligned.
+        // So we need to pad our 3 element array with 4 bytes.
         input_data.extend_from_slice(bytemuck::cast_slice(&a));
         input_data.extend_from_slice(&[0, 0, 0, 0]);
         input_data.extend_from_slice(bytemuck::cast_slice(&b));
@@ -62,7 +64,7 @@ fn vec3x2_as_input_f32_as_output(
             usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
-        let stating_buffer = context.device.create_buffer(&BufferDescriptor {
+        let staging_buffer = context.device.create_buffer(&BufferDescriptor {
             label: None,
             size: 4,
             usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
@@ -106,10 +108,10 @@ fn vec3x2_as_input_f32_as_output(
             cpass.dispatch_workgroups(1, 1, 1);
         }
 
-        encoder.copy_buffer_to_buffer(&output_buffer, 0, &stating_buffer, 0, 4);
+        encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging_buffer, 0, 4);
         context.queue.submit(Some(encoder.finish()));
 
-        let buffer_slice = stating_buffer.slice(..);
+        let buffer_slice = staging_buffer.slice(..);
         let (sender, receiver) = channel();
         buffer_slice.map_async(MapMode::Read, move |v| sender.send(v).unwrap());
 
@@ -120,7 +122,7 @@ fn vec3x2_as_input_f32_as_output(
             let result: f32 = bytemuck::cast_slice(&data)[0];
 
             drop(data);
-            stating_buffer.unmap();
+            staging_buffer.unmap();
 
             result
         } else {
@@ -174,9 +176,13 @@ fn test_delta_e_cie94() {
         )
     }
 
-    let delta_e = delta_e_cie94([255, 0, 0].to_lab(), [255, 128, 0].to_lab());
+    let result = delta_e_cie94([255, 0, 0].to_lab(), [255, 128, 0].to_lab());
+    let expected = 19.094658;
 
-    assert!((delta_e - 19.094658).abs() < 0.01);
+    assert!(
+        (result - expected).abs() < 0.01,
+        "CIE94 expected {expected}, was {result}"
+    );
 }
 
 #[test]
@@ -193,11 +199,42 @@ fn test_delta_e_cie2000() {
     let lab1 = [50.0000, 2.6772, -79.7751];
     let lab2 = [50.0000, 0.0000, -82.7485];
 
-    let delta_e_0 = delta_e_cie2000(lab1, lab2);
+    let result = delta_e_cie2000(lab1, lab2);
+    let expected = 2.0424595;
 
-    assert!((delta_e_0 - 2.0424595).abs() < 0.01);
+    assert!(
+        (result - expected).abs() < 0.01,
+        "CIE2000 expected {expected}, was {result}"
+    );
 
-    let delta_e_1 = delta_e_cie2000([255, 0, 0].to_lab(), [255, 128, 0].to_lab());
+    let result = delta_e_cie2000([255, 0, 0].to_lab(), [255, 128, 0].to_lab());
+    let expected = 21.164806;
 
-    assert!((delta_e_1 - 21.164806).abs() < 0.01);
+    assert!(
+        (result - 21.164806).abs() < 0.01,
+        "CIE2000 expected {expected}, was {result}"
+    );
+}
+
+#[test]
+fn test_pow() {
+    fn run_pow(number: f32, pow: f32) -> f32 {
+        vec3x2_as_input_f32_as_output(
+            include_shader!("shaders/tests/test_distance.wgsl").into(),
+            "run_pow",
+            [number, pow, 0.0],
+            [0.0, 0.0, 0.0],
+        )
+    }
+
+    let number = 2.1;
+    let pow = 7.0;
+
+    let result = run_pow(number, pow);
+    let expected = 180.1088541;
+
+    assert!(
+        (result - expected).abs() < 0.1,
+        "{number}^{pow} = {expected}, was {result}"
+    );
 }
