@@ -18,7 +18,7 @@ fn distance_cie94(one: vec3<f32>, second: vec3<f32>) -> f32{
     let SC = 1.0 + K1 * C1;
     let SH = 1.0 + K2 * C1;
 
-    return sqrt(max(pow(dL/SL, 2.0) + pow(dCab/SC, 2.0) + pow(dHab/SH, 2.0), 0.0));
+    return sqrt((dL/SL) * (dL/SL) + (dCab/SC) * (dCab/SC) + (dHab/SH) * (dHab/SH));
 }
 
 fn distance_cie2000(lab1: vec3<f32>, lab2: vec3<f32>) -> f32 {
