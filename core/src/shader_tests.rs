@@ -226,11 +226,11 @@ fn test_dummy_pow() {
         )
     }
 
-    let number = 25.0;
-    let pow = 4.0;
+    let number = 2.1;
+    let pow = 7.0;
 
     let result = run_pow(number, pow);
-    let expected = 390625.0;
+    let expected = 180.1088541;
 
     assert!(
         (result - expected).abs() < 0.5,
