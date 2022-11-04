@@ -58,4 +58,4 @@ jobs:
         run: cargo build
 
       - name: Run tests
-        run: WGPU_BACKEND="gl" cargo test
+        run: WGPU_BACKEND="vulkan" cargo test
