@@ -164,21 +164,25 @@ fn run_wgpu_test<T>(test_function: impl FnOnce(&TestingContext) -> T) -> T {
     result
 }
 
-// #[test]
-// fn test_delta_e_cie94() {
-//     fn delta_e_cie94(a: [f32; 3], b: [f32; 3]) -> f32 {
-//         vec3x2_as_input_f32_as_output(
-//             include_shader!("shaders/tests/test_distance.wgsl").into(),
-//             "run_distance_cie94",
-//             a,
-//             b,
-//         )
-//     }
+#[test]
+fn test_delta_e_cie94() {
+    fn delta_e_cie94(a: [f32; 3], b: [f32; 3]) -> f32 {
+        vec3x2_as_input_f32_as_output(
+            include_shader!("shaders/tests/test_distance.wgsl").into(),
+            "run_distance_cie94",
+            a,
+            b,
+        )
+    }
 
-//     let delta_e = delta_e_cie94([255, 0, 0].to_lab(), [255, 128, 0].to_lab());
+    let result = delta_e_cie94([255, 0, 0].to_lab(), [255, 128, 0].to_lab());
+    let expected = 19.094658;
 
-//     assert!((delta_e - 19.094658).abs() < 0.01);
-// }
+    assert!(
+        (result - expected).abs() < 0.01,
+        "CIE94 expected {expected}, was {result}"
+    );
+}
 
 // #[test]
 // fn test_delta_e_cie2000() {
@@ -220,7 +224,6 @@ fn test_dummy_pow() {
     let result = run_pow(number, pow);
     let expected = 390625.0;
 
-    assert_eq!(result, expected);
     assert!(
         (result - expected).abs() < 0.5,
         "{number}^{pow} = {expected}, was {result}"
