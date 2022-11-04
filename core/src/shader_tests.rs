@@ -201,3 +201,27 @@ fn test_delta_e_cie2000() {
 
     assert!((delta_e_1 - 21.164806).abs() < 0.01);
 }
+
+#[test]
+fn test_dummy_pow() {
+    fn run_pow(number: f32, pow: f32) -> f32 {
+        vec3x2_as_input_f32_as_output(
+            include_shader!("shaders/tests/test_distance.wgsl").into(),
+            "run_pow",
+            [number, pow, 0.0],
+            [0.0, 0.0, 0.0],
+        )
+    }
+
+    let number = 25.0;
+    let pow = 4.0;
+
+    let result = run_pow(number, pow);
+    let expected = number.powf(pow);
+
+    assert_eq!(result, expected);
+    assert!(
+        (result - expected).abs() < 0.5,
+        "{number}^{pow} = {expected}, was {result}"
+    );
+}
