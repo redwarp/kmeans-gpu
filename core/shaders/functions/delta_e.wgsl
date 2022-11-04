@@ -82,15 +82,15 @@ fn distance_cie2000(lab1: vec3<f32>, lab2: vec3<f32>) -> f32 {
     let deltaTheta = radians(30.0) * exp(-pow((barhPrime - radians(275.0))/radians(25.0), 2.0));
 
     let R_C = 2.0 * sqrt(pow(barCPrime, 7.0) / (pow(barCPrime, 7.0) + pow25To7));
-    let S_L = 1.0 + ((0.015 * pow(barLPrime - 50.0, 2.0)) / sqrt(20.0 + pow(barLPrime - 50.0, 2.0)));
+    let S_L = 1.0 + ((0.015 * (barLPrime - 50.0) * (barLPrime - 50.0)) / sqrt(20.0 + (barLPrime - 50.0) * (barLPrime - 50.0)));
     let S_C = 1.0 + (0.045 * barCPrime);
     let S_H = 1.0 + (0.015 * barCPrime * T);
     let R_T = (-sin(2.0 * deltaTheta)) * R_C;
 
     let deltaE = sqrt(
-	    pow(deltaLPrime / ( S_L), 2.0)
-	    + pow(deltaCPrime / ( S_C), 2.0)
-	    + pow(deltaHPrime / ( S_H), 2.0)
+	    (deltaLPrime / S_L) * (deltaLPrime / S_L)
+	    + (deltaCPrime / S_C) * (deltaCPrime / S_C)
+	    + (deltaHPrime / S_H) * (deltaHPrime / S_H)
 	    + (R_T * (deltaCPrime / ( S_C)) * (deltaHPrime / ( S_H))));
 
     return deltaE;
