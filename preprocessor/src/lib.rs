@@ -56,8 +56,6 @@ impl PreProcessor {
 
         fs::write(&into, &content)?;
 
-        println!("Processed {file}", file = path_diff.to_string_lossy());
-
         Ok(into)
     }
 
@@ -110,7 +108,7 @@ pub fn preprocess_shaders(shaders: &Path, out_dir: &Path) -> anyhow::Result<Vec<
 fn list_files(folder: &Path) -> anyhow::Result<Vec<PathBuf>> {
     fn recursive_list_files(folder: &Path, into: &mut Vec<PathBuf>) -> anyhow::Result<()> {
         if folder.is_dir() {
-            let paths = fs::read_dir(&folder)?;
+            let paths = fs::read_dir(folder)?;
 
             for read in paths {
                 let path = read?.path();

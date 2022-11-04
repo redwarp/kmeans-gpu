@@ -2,9 +2,9 @@ name: Rust
 
 on:
   push:
-    branches: ['main']
+    branches: ["main"]
   pull_request:
-    branches: ['main']
+    branches: ["main"]
 
 env:
   CARGO_TERM_COLOR: always
@@ -12,11 +12,49 @@ env:
 jobs:
   build:
     name: Test rust
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install rust stable
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+          components: llvm-tools-preview
+
+      - name: Install swiftshader
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p swiftshader
+          curl -LsSf https://github.com/gfx-rs/ci-build/releases/latest/download/swiftshader-linux-x86_64.tar.xz | tar -xf - -C swiftshader
+          echo "LD_LIBRARY_PATH=$PWD/swiftshader" >> $GITHUB_ENV
+
+      - name: Install llvmpipe, vulkan sdk
+        shell: bash
+        run: |
+          set -e
+
+          sudo apt-get update -y -qq
+          # vulkan sdk
+          wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
+          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
+          sudo apt-get update
+          sudo apt install -y libegl1-mesa libgl1-mesa-dri libxcb-xfixes0-dev vulkan-sdk
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: rust-test
+          cache-on-failure: true
+
       - name: Build
-        run: cargo build --verbose
+        run: cargo build
+
       - name: Run tests
-        run: cargo test --verbose
+        run: WGPU_BACKEND="gl" cargo test

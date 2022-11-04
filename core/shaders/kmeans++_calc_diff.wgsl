@@ -9,6 +9,8 @@ struct Centroids {
 @group(0) @binding(2) var distance_map: texture_storage_2d<r32float, write>;
 @group(1) @binding(0) var<uniform> k_index: u32;
 
+// #include functions/delta_e.wgsl
+
 @compute
 @workgroup_size(16, 16)
 fn main(
@@ -24,7 +26,7 @@ fn main(
     let color = textureLoad(pixels, coords, 0).rgb;
     var min_distance: f32 = 1000000.0;
     for (var k: u32 = 0u; k < k_index; k = k + 1u) {
-        let distance_to_centroid = distance(color, centroids.data[k].rgb);
+        let distance_to_centroid = distance_cie94(color, centroids.data[k].rgb);
         min_distance = min(min_distance, distance_to_centroid);
     }
 

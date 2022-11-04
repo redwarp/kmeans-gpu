@@ -1,5 +1,6 @@
 [workspace]
 members = ["core", "cli", "preprocessor"]
+default-members = ["cli", "core"]
 resolver = "2"
 
 [workspace.package]
