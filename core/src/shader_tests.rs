@@ -159,7 +159,8 @@ fn test_delta_e_cie94() {
 
     let delta_e = delta_e_cie94([255, 0, 0].to_lab(), [255, 128, 0].to_lab());
 
-    assert!((delta_e - 19.094658).abs() < 0.01);
+    // assert!((delta_e - 19.094658).abs() < 0.01);
+    assert_eq!(delta_e, 19.094658);
 }
 
 #[test]
