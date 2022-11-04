@@ -43,6 +43,7 @@ fn vec3x2_as_input_f32_as_output(
                 source: ShaderSource::Wgsl(shader_string),
             });
 
+        // let input_data = bytemuck::cast_vec(vec![a, b]);
         let mut input_data: Vec<u8> = vec![];
         input_data.extend_from_slice(bytemuck::cast_slice(&a));
         input_data.extend_from_slice(&[0, 0, 0, 0]);
@@ -62,7 +63,7 @@ fn vec3x2_as_input_f32_as_output(
             usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
-        let stating_buffer = context.device.create_buffer(&BufferDescriptor {
+        let staging_buffer = context.device.create_buffer(&BufferDescriptor {
             label: None,
             size: 4,
             usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
@@ -106,10 +107,10 @@ fn vec3x2_as_input_f32_as_output(
             cpass.dispatch_workgroups(1, 1, 1);
         }
 
-        encoder.copy_buffer_to_buffer(&output_buffer, 0, &stating_buffer, 0, 4);
+        encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging_buffer, 0, 4);
         context.queue.submit(Some(encoder.finish()));
 
-        let buffer_slice = stating_buffer.slice(..);
+        let buffer_slice = staging_buffer.slice(..);
         let (sender, receiver) = channel();
         buffer_slice.map_async(MapMode::Read, move |v| sender.send(v).unwrap());
 
@@ -120,7 +121,7 @@ fn vec3x2_as_input_f32_as_output(
             let result: f32 = bytemuck::cast_slice(&data)[0];
 
             drop(data);
-            stating_buffer.unmap();
+            staging_buffer.unmap();
 
             result
         } else {
@@ -217,7 +218,7 @@ fn test_dummy_pow() {
     let pow = 4.0;
 
     let result = run_pow(number, pow);
-    let expected = number.powf(pow);
+    let expected = 390625.0;
 
     assert_eq!(result, expected);
     assert!(
