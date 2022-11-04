@@ -16,6 +16,19 @@ struct TestingContext {
     queue: Queue,
 }
 
+trait ToLab {
+    fn to_lab(self) -> [f32; 3];
+}
+
+impl ToLab for [u8; 3] {
+    fn to_lab(self) -> [f32; 3] {
+        let lab: Lab = Srgb::new(self[0], self[1], self[2])
+            .into_format()
+            .into_color();
+        [lab.l, lab.a, lab.b]
+    }
+}
+
 fn vec3x2_as_input_f32_as_output(
     shader_string: Cow<str>,
     entry_point: &str,
@@ -187,15 +200,21 @@ fn test_delta_e_cie2000() {
     assert!((delta_e_1 - 21.164806).abs() < 0.01);
 }
 
-trait ToLab {
-    fn to_lab(self) -> [f32; 3];
-}
-
-impl ToLab for [u8; 3] {
-    fn to_lab(self) -> [f32; 3] {
-        let lab: Lab = Srgb::new(self[0], self[1], self[2])
-            .into_format()
-            .into_color();
-        [lab.l, lab.a, lab.b]
+#[test]
+fn test_distance() {
+    fn basic_delta(a: [f32; 3], b: [f32; 3]) -> f32 {
+        vec3x2_as_input_f32_as_output(
+            include_shader!("shaders/tests/test_distance.wgsl").into(),
+            "run_distance",
+            a,
+            b,
+        )
     }
+
+    let a = [1.0, 0.0, 0.0];
+    let b = [0.0, 10.0, 2.0];
+
+    let delta_e = basic_delta(a, b);
+
+    assert_eq!(delta_e, 10.24695);
 }

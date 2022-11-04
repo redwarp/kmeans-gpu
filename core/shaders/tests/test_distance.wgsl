@@ -19,3 +19,10 @@ fn run_distance_cie94(){
 fn run_distance_cie2000(){
     output = distance_cie2000(input.a, input.b);
 }
+
+@compute
+@workgroup_size(1)
+fn run_distance(){
+    output = distance(input.a, input.b);
+}
+
