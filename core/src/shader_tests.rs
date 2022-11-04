@@ -164,44 +164,44 @@ fn run_wgpu_test<T>(test_function: impl FnOnce(&TestingContext) -> T) -> T {
     result
 }
 
-#[test]
-fn test_delta_e_cie94() {
-    fn delta_e_cie94(a: [f32; 3], b: [f32; 3]) -> f32 {
-        vec3x2_as_input_f32_as_output(
-            include_shader!("shaders/tests/test_distance.wgsl").into(),
-            "run_distance_cie94",
-            a,
-            b,
-        )
-    }
+// #[test]
+// fn test_delta_e_cie94() {
+//     fn delta_e_cie94(a: [f32; 3], b: [f32; 3]) -> f32 {
+//         vec3x2_as_input_f32_as_output(
+//             include_shader!("shaders/tests/test_distance.wgsl").into(),
+//             "run_distance_cie94",
+//             a,
+//             b,
+//         )
+//     }
 
-    let delta_e = delta_e_cie94([255, 0, 0].to_lab(), [255, 128, 0].to_lab());
+//     let delta_e = delta_e_cie94([255, 0, 0].to_lab(), [255, 128, 0].to_lab());
 
-    assert!((delta_e - 19.094658).abs() < 0.01);
-}
+//     assert!((delta_e - 19.094658).abs() < 0.01);
+// }
 
-#[test]
-fn test_delta_e_cie2000() {
-    fn delta_e_cie2000(a: [f32; 3], b: [f32; 3]) -> f32 {
-        vec3x2_as_input_f32_as_output(
-            include_shader!("shaders/tests/test_distance.wgsl").into(),
-            "run_distance_cie2000",
-            a,
-            b,
-        )
-    }
+// #[test]
+// fn test_delta_e_cie2000() {
+//     fn delta_e_cie2000(a: [f32; 3], b: [f32; 3]) -> f32 {
+//         vec3x2_as_input_f32_as_output(
+//             include_shader!("shaders/tests/test_distance.wgsl").into(),
+//             "run_distance_cie2000",
+//             a,
+//             b,
+//         )
+//     }
 
-    let lab1 = [50.0000, 2.6772, -79.7751];
-    let lab2 = [50.0000, 0.0000, -82.7485];
+//     let lab1 = [50.0000, 2.6772, -79.7751];
+//     let lab2 = [50.0000, 0.0000, -82.7485];
 
-    let delta_e_0 = delta_e_cie2000(lab1, lab2);
+//     let delta_e_0 = delta_e_cie2000(lab1, lab2);
 
-    assert!((delta_e_0 - 2.0424595).abs() < 0.01);
+//     assert!((delta_e_0 - 2.0424595).abs() < 0.01);
 
-    let delta_e_1 = delta_e_cie2000([255, 0, 0].to_lab(), [255, 128, 0].to_lab());
+//     let delta_e_1 = delta_e_cie2000([255, 0, 0].to_lab(), [255, 128, 0].to_lab());
 
-    assert!((delta_e_1 - 21.164806).abs() < 0.01);
-}
+//     assert!((delta_e_1 - 21.164806).abs() < 0.01);
+// }
 
 #[test]
 fn test_dummy_pow() {
