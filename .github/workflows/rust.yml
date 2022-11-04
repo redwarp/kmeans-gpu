@@ -48,6 +48,15 @@ jobs:
           sudo apt-get update
           sudo apt install -y libegl1-mesa libgl1-mesa-dri libxcb-xfixes0-dev vulkan-sdk
 
+      - name: Disable debug
+        shell: bash
+        run: |
+          mkdir -p .cargo
+          echo """
+          [profile.dev]
+          incremental = false
+          debug = 1" >> .cargo/config.toml
+
       - name: Cache
         uses: Swatinem/rust-cache@v2
         with:

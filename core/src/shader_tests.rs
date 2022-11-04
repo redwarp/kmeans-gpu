@@ -43,8 +43,9 @@ fn vec3x2_as_input_f32_as_output(
                 source: ShaderSource::Wgsl(shader_string),
             });
 
-        // let input_data = bytemuck::cast_vec(vec![a, b]);
         let mut input_data: Vec<u8> = vec![];
+        // vec<f32> are 16 byte aligned.
+        // So we need to pad our 3 element array with 4 bytes.
         input_data.extend_from_slice(bytemuck::cast_slice(&a));
         input_data.extend_from_slice(&[0, 0, 0, 0]);
         input_data.extend_from_slice(bytemuck::cast_slice(&b));
@@ -216,7 +217,7 @@ fn test_delta_e_cie2000() {
 }
 
 #[test]
-fn test_dummy_pow() {
+fn test_pow() {
     fn run_pow(number: f32, pow: f32) -> f32 {
         vec3x2_as_input_f32_as_output(
             include_shader!("shaders/tests/test_distance.wgsl").into(),
@@ -233,7 +234,7 @@ fn test_dummy_pow() {
     let expected = 180.1088541;
 
     assert!(
-        (result - expected).abs() < 0.5,
+        (result - expected).abs() < 0.1,
         "{number}^{pow} = {expected}, was {result}"
     );
 }
