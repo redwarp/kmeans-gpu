@@ -178,7 +178,8 @@ fn test_delta_e_cie2000() {
 
     let delta_e_0 = delta_e_cie2000(lab1, lab2);
 
-    assert!((delta_e_0 - 2.0424595).abs() < 0.01);
+    // assert!((delta_e_0 - 2.0424595).abs() < 0.01);
+    assert_eq!(delta_e_0, 2.0424595);
 
     let delta_e_1 = delta_e_cie2000([255, 0, 0].to_lab(), [255, 128, 0].to_lab());
 

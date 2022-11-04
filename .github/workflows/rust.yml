@@ -51,6 +51,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           key: rust-test
+          cache-on-failure: true
 
       - name: Build
         run: cargo build
