@@ -172,8 +172,7 @@ fn test_delta_e_cie94() {
 
     let delta_e = delta_e_cie94([255, 0, 0].to_lab(), [255, 128, 0].to_lab());
 
-    // assert!((delta_e - 19.094658).abs() < 0.01);
-    assert_eq!(delta_e, 19.094658);
+    assert!((delta_e - 19.094658).abs() < 0.01);
 }
 
 #[test]
@@ -192,29 +191,9 @@ fn test_delta_e_cie2000() {
 
     let delta_e_0 = delta_e_cie2000(lab1, lab2);
 
-    // assert!((delta_e_0 - 2.0424595).abs() < 0.01);
-    assert_eq!(delta_e_0, 2.0424595);
+    assert!((delta_e_0 - 2.0424595).abs() < 0.01);
 
     let delta_e_1 = delta_e_cie2000([255, 0, 0].to_lab(), [255, 128, 0].to_lab());
 
     assert!((delta_e_1 - 21.164806).abs() < 0.01);
-}
-
-#[test]
-fn test_distance() {
-    fn basic_delta(a: [f32; 3], b: [f32; 3]) -> f32 {
-        vec3x2_as_input_f32_as_output(
-            include_shader!("shaders/tests/test_distance.wgsl").into(),
-            "run_distance",
-            a,
-            b,
-        )
-    }
-
-    let a = [1.0, 0.0, 0.0];
-    let b = [0.0, 10.0, 2.0];
-
-    let delta_e = basic_delta(a, b);
-
-    assert_eq!(delta_e, 10.24695);
 }
