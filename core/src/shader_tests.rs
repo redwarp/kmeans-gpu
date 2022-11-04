@@ -129,7 +129,7 @@ fn vec3x2_as_input_f32_as_output(
     })
 }
 
-fn run_wgpu_test<T>(test_function: impl FnOnce(TestingContext) -> T) -> T {
+fn run_wgpu_test<T>(test_function: impl FnOnce(&TestingContext) -> T) -> T {
     let backend_bits = util::backend_bits_from_env().unwrap_or_else(Backends::all);
     let instance = Instance::new(backend_bits);
     let adapter = pollster::block_on(util::initialize_adapter_from_env_or_default(
@@ -156,7 +156,11 @@ fn run_wgpu_test<T>(test_function: impl FnOnce(TestingContext) -> T) -> T {
 
     let context = TestingContext { device, queue };
 
-    test_function(context)
+    let result = test_function(&context);
+
+    context.device.poll(MaintainBase::Wait);
+
+    result
 }
 
 #[test]
