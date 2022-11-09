@@ -1,5 +1,7 @@
 use anyhow::Result;
 use palette::{IntoColor, Lab, Pixel, Srgba};
+use rgb::ComponentSlice;
+use rgb::RGBA8;
 use std::sync::mpsc::channel;
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
@@ -139,15 +141,19 @@ pub(crate) fn extract_palette_kmeans(
 
     let mut colors = centroids_buffer.pull_values(device, queue, color_space)?;
     colors.sort_unstable_by(|a, b| {
-        let a: Lab = Srgba::from_raw(a).into_format::<_, f32>().into_color();
-        let b: Lab = Srgba::from_raw(b).into_format::<_, f32>().into_color();
+        let a: Lab = Srgba::from_raw(a.as_slice())
+            .into_format::<_, f32>()
+            .into_color();
+        let b: Lab = Srgba::from_raw(b.as_slice())
+            .into_format::<_, f32>()
+            .into_color();
         a.l.partial_cmp(&b.l).unwrap()
     });
 
     Ok(centroids_buffer)
 }
 
-pub(crate) fn extract_palette_octree(pixels: &[[u8; 4]], color_count: u32) -> Result<Vec<[u8; 4]>> {
+pub(crate) fn extract_palette_octree(pixels: &[RGBA8], color_count: u32) -> Result<Vec<RGBA8>> {
     let mut tree = ColorTree::new();
     for pixel in pixels {
         tree.add_color(pixel);

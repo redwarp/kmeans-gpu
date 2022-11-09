@@ -1,5 +1,6 @@
 use anyhow::Result;
-use palette::{IntoColor, Lab, Pixel, Srgb, Srgba};
+use palette::{rgb::Rgba, IntoColor, Lab, Srgb, Srgba};
+use rgb::RGBA8;
 use std::{ops::Deref, sync::mpsc::channel, vec};
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
@@ -220,7 +221,7 @@ impl InputTexture {
         }
     }
 
-    pub fn pull_image(&self, device: &Device, queue: &Queue) -> Result<Image<Vec<[u8; 4]>>> {
+    pub fn pull_image(&self, device: &Device, queue: &Queue) -> Result<Image<Vec<RGBA8>>> {
         let (width, height) = self.dimensions;
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
 
@@ -441,7 +442,7 @@ impl OutputTexture {
         }
     }
 
-    pub fn pull_image(&self, device: &Device, queue: &Queue) -> Result<Image<Vec<[u8; 4]>>> {
+    pub fn pull_image(&self, device: &Device, queue: &Queue) -> Result<Image<Vec<RGBA8>>> {
         let Extent3d {
             width,
             height,
@@ -533,7 +534,7 @@ impl CentroidsBuffer {
         Self { copy_size, buffer }
     }
 
-    pub fn fixed_centroids(colors: &[[u8; 4]], color_space: &ColorSpace, device: &Device) -> Self {
+    pub fn fixed_centroids(colors: &[RGBA8], color_space: &ColorSpace, device: &Device) -> Self {
         let mut centroids: Vec<u8> = Vec::with_capacity(16 * (colors.len() + 1));
 
         // Aligned 16, see https://www.w3.org/TR/WGSL/#address-space-layout-constraints
@@ -544,11 +545,11 @@ impl CentroidsBuffer {
                 .iter()
                 .map(|c| match color_space {
                     ColorSpace::Lab => {
-                        let lab: Lab = Srgb::new(c[0], c[1], c[2]).into_format().into_color();
+                        let lab: Lab = Srgb::new(c.r, c.g, c.b).into_format().into_color();
                         [lab.l, lab.a, lab.b, 1.0]
                     }
                     ColorSpace::Rgb => {
-                        let srgb: Srgb = Srgb::new(c[0], c[1], c[2]).into_format();
+                        let srgb: Srgb = Srgb::new(c.r, c.g, c.b).into_format();
                         [srgb.red, srgb.green, srgb.blue, 1.0]
                     }
                 })
@@ -596,7 +597,7 @@ impl CentroidsBuffer {
         device: &Device,
         queue: &Queue,
         color_space: &ColorSpace,
-    ) -> Result<Vec<[u8; 4]>> {
+    ) -> Result<Vec<RGBA8>> {
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
 
         let staging_buffer = self.staging_buffer(device, &mut encoder);
@@ -618,17 +619,21 @@ impl CentroidsBuffer {
                 let colors: Vec<_> = bytemuck::cast_slice::<u8, f32>(&data[16..])
                     .chunks_exact(4)
                     .map(|color| {
-                        let raw: [u8; 4] = match color_space {
+                        let raw: Rgba<_, u8> = match color_space {
                             ColorSpace::Lab => IntoColor::<Srgba>::into_color(Lab::new(
                                 color[0], color[1], color[2],
                             ))
-                            .into_format()
-                            .into_raw(),
-                            ColorSpace::Rgb => Srgba::new(color[0], color[1], color[2], 1.0)
-                                .into_format()
-                                .into_raw(),
+                            .into_format(),
+                            ColorSpace::Rgb => {
+                                Srgba::new(color[0], color[1], color[2], 1.0).into_format()
+                            }
                         };
-                        raw
+                        RGBA8 {
+                            r: raw.red,
+                            g: raw.green,
+                            b: raw.blue,
+                            a: raw.alpha,
+                        }
                     })
                     .collect();
                 Ok(colors)

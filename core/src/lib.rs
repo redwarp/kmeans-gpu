@@ -1,6 +1,8 @@
 use anyhow::{anyhow, Result};
 use image::{Container, Image};
 use palette::{IntoColor, Lab, Pixel, Srgba};
+use rgb::ComponentSlice;
+pub use rgb::RGBA8;
 use std::{fmt::Display, str::FromStr, time::Instant};
 use structures::{CentroidsBuffer, InputTexture};
 use wgpu::{
@@ -158,7 +160,7 @@ pub fn palette<C: Container>(
     color_count: u32,
     image: &Image<C>,
     algo: Algorithm,
-) -> Result<Vec<[u8; 4]>> {
+) -> Result<Vec<RGBA8>> {
     match algo {
         Algorithm::Kmeans => kmeans_palette(image_processor, color_count, image),
         Algorithm::Octree => octree_palette(image_processor, color_count, image),
@@ -168,9 +170,9 @@ pub fn palette<C: Container>(
 pub fn find<C: Container>(
     image_processor: &ImageProcessor,
     image: &Image<C>,
-    colors: &[[u8; 4]],
+    colors: &[RGBA8],
     reduce_mode: &ReduceMode,
-) -> Result<Image<Vec<[u8; 4]>>> {
+) -> Result<Image<Vec<RGBA8>>> {
     let input_texture = InputTexture::new(&image_processor.device, &image_processor.queue, image);
     let centroids_buffer =
         CentroidsBuffer::fixed_centroids(colors, &ColorSpace::Lab, &image_processor.device);
@@ -210,7 +212,7 @@ pub fn reduce<C: Container>(
     image: &Image<C>,
     algo: &Algorithm,
     reduce_mode: &ReduceMode,
-) -> Result<Image<Vec<[u8; 4]>>> {
+) -> Result<Image<Vec<RGBA8>>> {
     let input_texture = InputTexture::new(&image_processor.device, &image_processor.queue, image);
 
     let centroids_buffer = match algo {
@@ -261,7 +263,7 @@ fn kmeans_palette<C: Container>(
     image_processor: &ImageProcessor,
     color_count: u32,
     image: &Image<C>,
-) -> Result<Vec<[u8; 4]>> {
+) -> Result<Vec<RGBA8>> {
     let input_texture = InputTexture::new(&image_processor.device, &image_processor.queue, image);
 
     let mut colors = operations::extract_palette_kmeans(
@@ -279,8 +281,12 @@ fn kmeans_palette<C: Container>(
     )?;
 
     colors.sort_unstable_by(|a, b| {
-        let a: Lab = Srgba::from_raw(a).into_format::<_, f32>().into_color();
-        let b: Lab = Srgba::from_raw(b).into_format::<_, f32>().into_color();
+        let a: Lab = Srgba::from_raw(a.as_slice())
+            .into_format::<_, f32>()
+            .into_color();
+        let b: Lab = Srgba::from_raw(b.as_slice())
+            .into_format::<_, f32>()
+            .into_color();
         a.l.partial_cmp(&b.l).unwrap()
     });
     Ok(colors)
@@ -290,7 +296,7 @@ fn octree_palette<C: Container>(
     image_processor: &ImageProcessor,
     color_count: u32,
     image: &Image<C>,
-) -> Result<Vec<[u8; 4]>> {
+) -> Result<Vec<RGBA8>> {
     const MAX_SIZE: u32 = 128;
 
     let (width, height) = image.dimensions;
@@ -306,7 +312,7 @@ fn octree_palette<C: Container>(
         None
     };
 
-    let pixels: &[[u8; 4]] = if let Some(resized) = &resized {
+    let pixels: &[RGBA8] = if let Some(resized) = &resized {
         &resized.rgba
     } else {
         &image.rgba
@@ -321,8 +327,12 @@ fn octree_palette<C: Container>(
     }
 
     colors.sort_unstable_by(|a, b| {
-        let a: Lab = Srgba::from_raw(a).into_format::<_, f32>().into_color();
-        let b: Lab = Srgba::from_raw(b).into_format::<_, f32>().into_color();
+        let a: Lab = Srgba::from_raw(a.as_slice())
+            .into_format::<_, f32>()
+            .into_color();
+        let b: Lab = Srgba::from_raw(b.as_slice())
+            .into_format::<_, f32>()
+            .into_color();
         a.l.partial_cmp(&b.l).unwrap()
     });
 

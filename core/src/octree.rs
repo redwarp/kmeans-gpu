@@ -5,18 +5,20 @@ use std::{
     rc::Rc,
 };
 
+use rgb::RGBA8;
+
 const MAX_DEPTH: u8 = 8;
 
-fn get_color_index(color: &[u8; 4], level: u8) -> usize {
+fn get_color_index(color: &RGBA8, level: u8) -> usize {
     let mut index: usize = 0;
     let mask = 0b10000000 >> level;
-    if (color[0] & mask) > 0 {
+    if (color.r & mask) > 0 {
         index |= 0b100;
     }
-    if (color[1] & mask) > 0 {
+    if (color.g & mask) > 0 {
         index |= 0b010;
     }
-    if (color[2] & mask) > 0 {
+    if (color.b & mask) > 0 {
         index |= 0b001;
     }
 
@@ -37,7 +39,7 @@ impl ColorTree {
         Self { nodes }
     }
 
-    pub fn add_color(&mut self, color: &[u8; 4]) {
+    pub fn add_color(&mut self, color: &RGBA8) {
         let mut level = 0;
         let mut root_id = NodeId(0);
 
@@ -62,7 +64,7 @@ impl ColorTree {
         self.nodes[*root_id].borrow_mut().accumulator += color;
     }
 
-    pub fn reduce(&mut self, color_count: usize) -> Vec<[u8; 4]> {
+    pub fn reduce(&mut self, color_count: usize) -> Vec<RGBA8> {
         if color_count == 0 {
             return vec![];
         }
@@ -129,21 +131,21 @@ impl ColorAccumulator {
         }
     }
 
-    fn output_color(&self) -> [u8; 4] {
-        [
-            (self.r / self.pixel_count) as u8,
-            (self.g / self.pixel_count) as u8,
-            (self.b / self.pixel_count) as u8,
-            255,
-        ]
+    fn output_color(&self) -> RGBA8 {
+        RGBA8 {
+            r: (self.r / self.pixel_count) as u8,
+            g: (self.g / self.pixel_count) as u8,
+            b: (self.b / self.pixel_count) as u8,
+            a: 255,
+        }
     }
 }
 
-impl AddAssign<&[u8; 4]> for ColorAccumulator {
-    fn add_assign(&mut self, rhs: &[u8; 4]) {
-        self.r += rhs[0] as u64;
-        self.g += rhs[1] as u64;
-        self.b += rhs[2] as u64;
+impl AddAssign<&RGBA8> for ColorAccumulator {
+    fn add_assign(&mut self, rhs: &RGBA8) {
+        self.r += rhs.r as u64;
+        self.g += rhs.g as u64;
+        self.b += rhs.b as u64;
         self.pixel_count += 1;
     }
 }
@@ -241,6 +243,8 @@ impl Ord for Node {
 
 #[cfg(test)]
 mod tests {
+    use rgb::RGBA;
+
     use super::ColorTree;
 
     #[test]
@@ -294,7 +298,8 @@ mod tests {
             [231, 213, 179, 255],
             [232, 193, 112, 255],
             [235, 237, 233, 255],
-        ];
+        ]
+        .map(|rgba| RGBA::from(rgba));
         println!("Sorting {} colors", pixels.len());
         for pixel in &pixels {
             tree.add_color(pixel);

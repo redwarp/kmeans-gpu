@@ -1,19 +1,22 @@
 use std::ops::Deref;
 
-pub trait Container: Deref<Target = [[u8; 4]]> + Sized {
+use rgb::RGBA8;
+
+pub trait Container: Deref<Target = [RGBA8]> + Sized {
     fn to_pixel_vec(self) -> Vec<u8> {
         bytemuck::cast_slice::<_, u8>(&self).to_vec()
     }
 }
 
-impl Container for Vec<[u8; 4]> {
+impl Container for Vec<RGBA8> {
     fn to_pixel_vec(self) -> Vec<u8> {
         bytemuck::cast_vec(self)
     }
 }
 
-impl Container for &[[u8; 4]] {}
+impl Container for &[RGBA8] {}
 
+/// Image struct manipulated by the library.
 pub struct Image<C>
 where
     C: Container,
@@ -30,7 +33,7 @@ where
         Self { dimensions, rgba }
     }
 
-    pub fn get_pixel(&self, x: u32, y: u32) -> &[u8; 4] {
+    pub fn get_pixel(&self, x: u32, y: u32) -> &RGBA8 {
         let index = (x + y * self.dimensions.0) as usize;
         &self.rgba[index]
     }
@@ -44,7 +47,7 @@ where
     }
 }
 
-pub fn copied_pixel(dimensions: (u32, u32), rbga: &[u8]) -> Image<Vec<[u8; 4]>> {
+pub fn copied_pixel(dimensions: (u32, u32), rbga: &[u8]) -> Image<Vec<RGBA8>> {
     let mut pixels = Vec::with_capacity(dimensions.0 as usize * dimensions.1 as usize);
     pixels.extend_from_slice(bytemuck::cast_slice(rbga));
     Image {
@@ -53,7 +56,7 @@ pub fn copied_pixel(dimensions: (u32, u32), rbga: &[u8]) -> Image<Vec<[u8; 4]>> 
     }
 }
 
-pub fn borrowed_pixel(dimensions: (u32, u32), rbga: &[u8]) -> Image<&[[u8; 4]]> {
+pub fn borrowed_pixel(dimensions: (u32, u32), rbga: &[u8]) -> Image<&[RGBA8]> {
     Image {
         dimensions,
         rgba: bytemuck::cast_slice(rbga),

@@ -2,7 +2,7 @@ use anyhow::{Ok, Result};
 use args::{Cli, Commands, Extension, Palette};
 use clap::Parser;
 use color_quantization_gpu::{
-    find, image::Image, palette, reduce, Algorithm, ImageProcessor, ReduceMode,
+    find, image::Image, palette, reduce, Algorithm, ImageProcessor, ReduceMode, RGBA8,
 };
 use image::{ImageBuffer, Rgba, RgbaImage};
 use pollster::FutureExt;
@@ -64,7 +64,7 @@ async fn palette_subcommand2(
 
     let colors = result
         .into_iter()
-        .map(|color| format!("#{:02X}{:02X}{:02X}", color[0], color[1], color[2]))
+        .map(|color| format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b))
         .collect::<Vec<_>>()
         .join(",");
 
@@ -216,7 +216,7 @@ fn find_file_path(
     }
 }
 
-fn save_palette<P>(path: P, palette: &[[u8; 4]], size: u32) -> Result<()>
+fn save_palette<P>(path: P, palette: &[RGBA8], size: u32) -> Result<()>
 where
     P: AsRef<Path>,
 {
@@ -228,7 +228,7 @@ where
         let index = (x / size) as usize;
         let color = palette[index];
 
-        *pixel = Rgba(color);
+        *pixel = Rgba([color.r, color.g, color.b, color.a]);
     }
 
     image_buffer.save(path)?;
@@ -236,6 +236,6 @@ where
     Ok(())
 }
 
-fn to_lib_image(image: &RgbaImage) -> Image<&[[u8; 4]]> {
+fn to_lib_image(image: &RgbaImage) -> Image<&[RGBA8]> {
     Image::new(image.dimensions(), bytemuck::cast_slice(image.as_raw()))
 }

@@ -6,6 +6,7 @@ use anyhow::anyhow;
 use anyhow::Result;
 use clap::ValueEnum;
 use clap::{Parser, Subcommand};
+use color_quantization_gpu::RGBA8;
 use regex::Regex;
 
 #[derive(Parser)]
@@ -153,7 +154,7 @@ impl From<Algorithm> for color_quantization_gpu::Algorithm {
 
 #[derive(Clone)]
 pub struct Palette {
-    pub colors: Vec<[u8; 4]>,
+    pub colors: Vec<RGBA8>,
 }
 
 fn validate_k(s: &str) -> Result<u32> {
@@ -204,7 +205,7 @@ fn parse_palette(path: &PathBuf) -> Result<Palette> {
         ));
     }
 
-    let mut colors: Vec<[u8; 4]> = bytemuck::cast_slice(image.as_raw()).to_vec();
+    let mut colors: Vec<RGBA8> = bytemuck::cast_slice(image.as_raw()).to_vec();
     colors.sort();
     colors.dedup();
 
@@ -222,7 +223,7 @@ fn parse_colors(colors: &str) -> Result<Palette> {
             let g = u8::from_str_radix(&color_string[3..5], 16)?;
             let b = u8::from_str_radix(&color_string[5..7], 16)?;
 
-            Ok([r, g, b, 255])
+            Ok(RGBA8 { r, g, b, a: 255 })
         })
         .collect::<Result<Vec<_>>>()?;
 
@@ -231,6 +232,7 @@ fn parse_colors(colors: &str) -> Result<Palette> {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     #[test]
@@ -270,7 +272,8 @@ mod tests {
 
         assert_eq!(2, colors.len());
 
-        let expected: Vec<[u8; 4]> = vec![[255, 255, 255, 255], [0, 0, 0, 255]];
+        let expected = [[255, 255, 255, 255], [0, 0, 0, 255]].map(|color| color.into());
+
         assert_eq!(colors, expected);
     }
 

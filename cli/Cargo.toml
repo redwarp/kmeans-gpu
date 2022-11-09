@@ -24,3 +24,4 @@ env_logger = "0.9"
 regex = "1.6"
 color-quantization-gpu = { path = "../core" }
 bytemuck = "1.12"
+rgb = "0.8"

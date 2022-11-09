@@ -218,6 +218,7 @@ dependencies = [
  "palette",
  "pollster",
  "preprocessor",
+ "rgb",
  "wgpu",
 ]
 
@@ -234,6 +235,7 @@ dependencies = [
  "log",
  "pollster",
  "regex",
+ "rgb",
 ]
 
 [[package]]
@@ -903,6 +905,15 @@ name = "renderdoc-sys"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1382d1f0a252c4bf97dc20d979a2fdd05b024acd7c2ed0f7595d7817666a157"
+
+[[package]]
+name = "rgb"
+version = "0.8.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3603b7d71ca82644f79b5a06d1220e9a58ede60bd32255f698cb1af8838b8db3"
+dependencies = [
+ "bytemuck",
+]
 
 [[package]]
 name = "rustc-hash"
