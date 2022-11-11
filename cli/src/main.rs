@@ -2,9 +2,7 @@ use anyhow::{Ok, Result};
 use args::{Cli, Commands, Extension, Palette};
 use clap::Parser;
 use image::{ImageBuffer, Rgba, RgbaImage};
-use kmeans_color_gpu::{
-    find, image::Image, palette, reduce, Algorithm, ImageProcessor, ReduceMode, RGBA8,
-};
+use kmeans_color_gpu::{image::Image, Algorithm, ImageProcessor, ReduceMode, RGBA8};
 use pollster::FutureExt;
 use std::{
     borrow::Cow,
@@ -57,7 +55,7 @@ async fn palette_subcommand2(
 
     let image_processor = ImageProcessor::new().await?;
 
-    let result = palette(&image_processor, color_count, &image, algo)?;
+    let result = image_processor.palette(color_count, &image, algo)?;
 
     let path = palette_file_path(color_count, &input, &output, &algo, size)?;
     save_palette(path, &result, size)?;
@@ -83,7 +81,7 @@ async fn find_subcommand(
     let image = to_lib_image(&image);
 
     let image_processor = ImageProcessor::new().await?;
-    let result = find(&image_processor, &image, &palette.colors, &reduce_mode)?;
+    let result = image_processor.find(&image, &palette.colors, &reduce_mode)?;
 
     let (width, height) = result.dimensions();
 
@@ -108,7 +106,7 @@ async fn reduce_subcommand(
     let image = to_lib_image(&image);
 
     let image_processor = ImageProcessor::new().await?;
-    let result = reduce(&image_processor, color_count, &image, &algo, &reduce_mode)?;
+    let result = image_processor.reduce(color_count, &image, &algo, &reduce_mode)?;
 
     let (width, height) = result.dimensions();
 
