@@ -66,6 +66,110 @@ impl ImageProcessor {
             query_time,
         })
     }
+
+    pub fn palette<C: Container>(
+        &self,
+        color_count: u32,
+        image: &Image<C>,
+        algo: Algorithm,
+    ) -> Result<Vec<RGBA8>> {
+        match algo {
+            Algorithm::Kmeans => kmeans_palette(self, color_count, image),
+            Algorithm::Octree => octree_palette(self, color_count, image),
+        }
+    }
+
+    pub fn find<C: Container>(
+        &self,
+        image: &Image<C>,
+        colors: &[RGBA8],
+        reduce_mode: &ReduceMode,
+    ) -> Result<Image<Vec<RGBA8>>> {
+        let input_texture = InputTexture::new(&self.device, &self.queue, image);
+        let centroids_buffer =
+            CentroidsBuffer::fixed_centroids(colors, &ColorSpace::Lab, &self.device);
+
+        match reduce_mode {
+            ReduceMode::Replace => operations::find_colors(
+                &self.device,
+                &self.queue,
+                &input_texture,
+                &ColorSpace::Lab,
+                &centroids_buffer,
+                self.query_time,
+            ),
+            ReduceMode::Dither => operations::dither_colors(
+                &self.device,
+                &self.queue,
+                &input_texture,
+                &ColorSpace::Lab,
+                &centroids_buffer,
+                self.query_time,
+            ),
+            ReduceMode::Meld => operations::meld_colors(
+                &self.device,
+                &self.queue,
+                &input_texture,
+                &ColorSpace::Lab,
+                &centroids_buffer,
+                self.query_time,
+            ),
+        }?
+        .pull_image(&self.device, &self.queue)
+    }
+
+    pub fn reduce<C: Container>(
+        &self,
+        color_count: u32,
+        image: &Image<C>,
+        algo: &Algorithm,
+        reduce_mode: &ReduceMode,
+    ) -> Result<Image<Vec<RGBA8>>> {
+        let input_texture = InputTexture::new(&self.device, &self.queue, image);
+
+        let centroids_buffer = match algo {
+            Algorithm::Kmeans => operations::extract_palette_kmeans(
+                &self.device,
+                &self.queue,
+                &input_texture,
+                &ColorSpace::Lab,
+                color_count,
+                self.query_time,
+            )?,
+            Algorithm::Octree => {
+                let palette = octree_palette(self, color_count, image)?;
+                CentroidsBuffer::fixed_centroids(&palette, &ColorSpace::Lab, &self.device)
+            }
+        };
+
+        match reduce_mode {
+            ReduceMode::Replace => operations::find_colors(
+                &self.device,
+                &self.queue,
+                &input_texture,
+                &ColorSpace::Lab,
+                &centroids_buffer,
+                self.query_time,
+            ),
+            ReduceMode::Dither => operations::dither_colors(
+                &self.device,
+                &self.queue,
+                &input_texture,
+                &ColorSpace::Lab,
+                &centroids_buffer,
+                self.query_time,
+            ),
+            ReduceMode::Meld => operations::meld_colors(
+                &self.device,
+                &self.queue,
+                &input_texture,
+                &ColorSpace::Lab,
+                &centroids_buffer,
+                self.query_time,
+            ),
+        }?
+        .pull_image(&self.device, &self.queue)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -154,110 +258,6 @@ impl Display for ReduceMode {
             }
         )
     }
-}
-
-pub fn palette<C: Container>(
-    image_processor: &ImageProcessor,
-    color_count: u32,
-    image: &Image<C>,
-    algo: Algorithm,
-) -> Result<Vec<RGBA8>> {
-    match algo {
-        Algorithm::Kmeans => kmeans_palette(image_processor, color_count, image),
-        Algorithm::Octree => octree_palette(image_processor, color_count, image),
-    }
-}
-
-pub fn find<C: Container>(
-    image_processor: &ImageProcessor,
-    image: &Image<C>,
-    colors: &[RGBA8],
-    reduce_mode: &ReduceMode,
-) -> Result<Image<Vec<RGBA8>>> {
-    let input_texture = InputTexture::new(&image_processor.device, &image_processor.queue, image);
-    let centroids_buffer =
-        CentroidsBuffer::fixed_centroids(colors, &ColorSpace::Lab, &image_processor.device);
-
-    match reduce_mode {
-        ReduceMode::Replace => operations::find_colors(
-            &image_processor.device,
-            &image_processor.queue,
-            &input_texture,
-            &ColorSpace::Lab,
-            &centroids_buffer,
-            image_processor.query_time,
-        ),
-        ReduceMode::Dither => operations::dither_colors(
-            &image_processor.device,
-            &image_processor.queue,
-            &input_texture,
-            &ColorSpace::Lab,
-            &centroids_buffer,
-            image_processor.query_time,
-        ),
-        ReduceMode::Meld => operations::meld_colors(
-            &image_processor.device,
-            &image_processor.queue,
-            &input_texture,
-            &ColorSpace::Lab,
-            &centroids_buffer,
-            image_processor.query_time,
-        ),
-    }?
-    .pull_image(&image_processor.device, &image_processor.queue)
-}
-
-pub fn reduce<C: Container>(
-    image_processor: &ImageProcessor,
-    color_count: u32,
-    image: &Image<C>,
-    algo: &Algorithm,
-    reduce_mode: &ReduceMode,
-) -> Result<Image<Vec<RGBA8>>> {
-    let input_texture = InputTexture::new(&image_processor.device, &image_processor.queue, image);
-
-    let centroids_buffer = match algo {
-        Algorithm::Kmeans => operations::extract_palette_kmeans(
-            &image_processor.device,
-            &image_processor.queue,
-            &input_texture,
-            &ColorSpace::Lab,
-            color_count,
-            image_processor.query_time,
-        )?,
-        Algorithm::Octree => {
-            let palette = octree_palette(image_processor, color_count, image)?;
-            CentroidsBuffer::fixed_centroids(&palette, &ColorSpace::Lab, &image_processor.device)
-        }
-    };
-
-    match reduce_mode {
-        ReduceMode::Replace => operations::find_colors(
-            &image_processor.device,
-            &image_processor.queue,
-            &input_texture,
-            &ColorSpace::Lab,
-            &centroids_buffer,
-            image_processor.query_time,
-        ),
-        ReduceMode::Dither => operations::dither_colors(
-            &image_processor.device,
-            &image_processor.queue,
-            &input_texture,
-            &ColorSpace::Lab,
-            &centroids_buffer,
-            image_processor.query_time,
-        ),
-        ReduceMode::Meld => operations::meld_colors(
-            &image_processor.device,
-            &image_processor.queue,
-            &input_texture,
-            &ColorSpace::Lab,
-            &centroids_buffer,
-            image_processor.query_time,
-        ),
-    }?
-    .pull_image(&image_processor.device, &image_processor.queue)
 }
 
 fn kmeans_palette<C: Container>(
