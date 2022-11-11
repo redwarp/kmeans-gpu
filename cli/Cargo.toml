@@ -1,5 +1,5 @@
 [package]
-name = "lmeans-color-gpu-cli"
+name = "kmeans-color-gpu-cli"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

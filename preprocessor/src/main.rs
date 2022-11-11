@@ -4,8 +4,6 @@ use std::{fs, path::Path};
 pub mod validate;
 
 fn main() {
-    println!("Hello, world!");
-
     let shaders = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
@@ -15,7 +13,7 @@ fn main() {
     fs::create_dir_all(&out_dir).unwrap();
 
     #[cfg(not(feature = "validate"))]
-    preprocessor::preprocess_shaders(&shaders, &out_dir).unwrap();
+    kmeans_color_gpu_preprocessor::preprocess_shaders(&shaders, &out_dir).unwrap();
 
     #[cfg(feature = "validate")]
     generate_and_validate(&shaders, &out_dir)

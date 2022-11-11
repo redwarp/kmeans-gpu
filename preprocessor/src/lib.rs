@@ -2,7 +2,7 @@ use regex::Regex;
 use std::{
     borrow::Cow,
     ffi::OsStr,
-    fs,
+    fs, io,
     path::{Path, PathBuf},
 };
 
@@ -74,14 +74,17 @@ impl PreProcessor {
                     let to_include = wgsl_file
                         .parent()
                         .expect("Should have parents?")
-                        .join(include_filename)
-                        .canonicalize()?;
-
-                    let path_as_string = to_include.to_string_lossy().into_owned();
+                        .join(include_filename);
 
                     if !to_include.exists() {
                         return Err(anyhow::anyhow!("File {include_filename} doesn't exist."));
-                    } else if inflated.contains(&path_as_string) {
+                    }
+
+                    let to_include = to_include.canonicalize()?;
+
+                    let path_as_string = to_include.to_string_lossy().into_owned();
+
+                    if inflated.contains(&path_as_string) {
                         return Err(anyhow::anyhow!(
                             "Recursion: file {include_filename} already inflated."
                         ));
@@ -100,13 +103,16 @@ impl PreProcessor {
     }
 }
 
+/// Preprocess all shaders from the shaders directory, and outputting the inflatted shaders
+/// in the out directory.
+/// Preprocessing shaders will inflate `// #include <file>.wgsl`, allowing reusing of functions.
 pub fn preprocess_shaders(shaders: &Path, out_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
     let preprocessor = PreProcessor::new(shaders);
     preprocessor.preprocess_shaders(out_dir)
 }
 
-fn list_files(folder: &Path) -> anyhow::Result<Vec<PathBuf>> {
-    fn recursive_list_files(folder: &Path, into: &mut Vec<PathBuf>) -> anyhow::Result<()> {
+fn list_files(folder: &Path) -> io::Result<Vec<PathBuf>> {
+    fn recursive_list_files(folder: &Path, into: &mut Vec<PathBuf>) -> io::Result<()> {
         if folder.is_dir() {
             let paths = fs::read_dir(folder)?;
 
