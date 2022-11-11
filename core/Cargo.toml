@@ -21,6 +21,8 @@ rgb = { version = "0.8", features = ["as-bytes"] }
 
 [dev-dependencies]
 pollster = "0.2"
+image = { version = "0.24", default-features = false, features = ["png"] }
+gif = "0.11"
 
 [build-dependencies]
 preprocessor = { path = "../preprocessor" }

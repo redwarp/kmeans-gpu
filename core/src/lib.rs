@@ -1,14 +1,15 @@
 use anyhow::{anyhow, Result};
-use image::{Container, Image};
 use palette::{IntoColor, Lab, Pixel, Srgba};
 use rgb::ComponentSlice;
 pub use rgb::RGBA8;
 use std::{fmt::Display, str::FromStr, time::Instant};
-use structures::{CentroidsBuffer, InputTexture};
 use wgpu::{
     Backends, Device, DeviceDescriptor, Features, Instance, PowerPreference, Queue,
     RequestAdapterOptionsBase,
 };
+
+use crate::image::{Container, Image};
+use crate::structures::{CentroidsBuffer, InputTexture};
 
 mod modules;
 mod octree;
