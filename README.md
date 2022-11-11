@@ -4,6 +4,8 @@ Calculate the k average colors in an image using k-means clustering, leveraging 
 
 Totally 100% inspired by [kmeans-colors](https://github.com/okaneco/kmeans-colors).
 
+![Turtles](gfx/turtles.gif)
+
 ## Limitation
 
 As this loads an image as a texture to your graphic cards, it also comes with some limitation based on the GPU backends: It won't work if the original image is bigger than **8192x8192** pixels.
