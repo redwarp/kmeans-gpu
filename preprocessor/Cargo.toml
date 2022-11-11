@@ -1,5 +1,5 @@
 [package]
-name = "preprocessor"
+name = "kmeans-color-gpu-preprocessor"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

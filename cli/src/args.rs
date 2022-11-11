@@ -6,7 +6,7 @@ use anyhow::anyhow;
 use anyhow::Result;
 use clap::ValueEnum;
 use clap::{Parser, Subcommand};
-use color_quantization_gpu::RGBA8;
+use kmeans_color_gpu::RGBA8;
 use regex::Regex;
 
 #[derive(Parser)]
@@ -112,12 +112,12 @@ pub enum ReduceMode {
     Meld,
 }
 
-impl From<ReduceMode> for color_quantization_gpu::ReduceMode {
+impl From<ReduceMode> for kmeans_color_gpu::ReduceMode {
     fn from(reduce_mode: ReduceMode) -> Self {
         match reduce_mode {
-            ReduceMode::Replace => color_quantization_gpu::ReduceMode::Replace,
-            ReduceMode::Dither => color_quantization_gpu::ReduceMode::Dither,
-            ReduceMode::Meld => color_quantization_gpu::ReduceMode::Meld,
+            ReduceMode::Replace => kmeans_color_gpu::ReduceMode::Replace,
+            ReduceMode::Dither => kmeans_color_gpu::ReduceMode::Dither,
+            ReduceMode::Meld => kmeans_color_gpu::ReduceMode::Meld,
         }
     }
 }
@@ -128,11 +128,11 @@ pub enum ColorSpace {
     Rgb,
 }
 
-impl From<ColorSpace> for color_quantization_gpu::ColorSpace {
+impl From<ColorSpace> for kmeans_color_gpu::ColorSpace {
     fn from(color_space: ColorSpace) -> Self {
         match color_space {
-            ColorSpace::Lab => color_quantization_gpu::ColorSpace::Lab,
-            ColorSpace::Rgb => color_quantization_gpu::ColorSpace::Rgb,
+            ColorSpace::Lab => kmeans_color_gpu::ColorSpace::Lab,
+            ColorSpace::Rgb => kmeans_color_gpu::ColorSpace::Rgb,
         }
     }
 }
@@ -143,11 +143,11 @@ pub enum Algorithm {
     Octree,
 }
 
-impl From<Algorithm> for color_quantization_gpu::Algorithm {
+impl From<Algorithm> for kmeans_color_gpu::Algorithm {
     fn from(algo: Algorithm) -> Self {
         match algo {
-            Algorithm::Kmeans => color_quantization_gpu::Algorithm::Kmeans,
-            Algorithm::Octree => color_quantization_gpu::Algorithm::Octree,
+            Algorithm::Kmeans => kmeans_color_gpu::Algorithm::Kmeans,
+            Algorithm::Octree => kmeans_color_gpu::Algorithm::Octree,
         }
     }
 }

@@ -209,38 +209,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "color-quantization-gpu"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytemuck",
- "gif",
- "image",
- "log",
- "palette",
- "pollster",
- "preprocessor",
- "rgb",
- "wgpu",
-]
-
-[[package]]
-name = "color-quantization-gpu-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytemuck",
- "clap",
- "color-quantization-gpu",
- "env_logger",
- "image",
- "log",
- "pollster",
- "regex",
- "rgb",
-]
-
-[[package]]
 name = "color_quant"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -516,6 +484,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "kmeans-color-gpu"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "gif",
+ "image",
+ "kmeans-color-gpu-preprocessor",
+ "log",
+ "palette",
+ "pollster",
+ "rgb",
+ "wgpu",
+]
+
+[[package]]
+name = "kmeans-color-gpu-preprocessor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "codespan-reporting",
+ "naga",
+ "pathdiff",
+ "regex",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.137"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -529,6 +524,22 @@ checksum = "efbc0f03f9a775e9f6aed295c6a1ba2253c5757a9e03d55c6caa46a681abcddd"
 dependencies = [
  "cfg-if",
  "winapi",
+]
+
+[[package]]
+name = "lmeans-color-gpu-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "clap",
+ "env_logger",
+ "image",
+ "kmeans-color-gpu",
+ "log",
+ "pollster",
+ "regex",
+ "rgb",
 ]
 
 [[package]]
@@ -796,17 +807,6 @@ name = "pollster"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5da3b0203fd7ee5720aa0b5e790b591aa5d3f41c3ed2c34a3a393382198af2f7"
-
-[[package]]
-name = "preprocessor"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "codespan-reporting",
- "naga",
- "pathdiff",
- "regex",
-]
 
 [[package]]
 name = "proc-macro-error"

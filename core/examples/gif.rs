@@ -1,7 +1,7 @@
 use std::{fs::File, path::Path};
 
-use color_quantization_gpu::{image::Image, reduce, Algorithm, ImageProcessor, ReduceMode};
 use gif::{Frame, Repeat};
+use kmeans_color_gpu::{image::Image, reduce, Algorithm, ImageProcessor, ReduceMode};
 use pollster::FutureExt;
 
 fn main() {

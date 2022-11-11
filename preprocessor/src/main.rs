@@ -23,7 +23,9 @@ fn main() {
 
 #[cfg(feature = "validate")]
 fn generate_and_validate(shaders: &Path, out_dir: &Path) {
-    let generated_shaders = preprocessor::preprocess_shaders(&shaders, &out_dir).unwrap();
+    use kmeans_color_gpu_preprocessor::preprocess_shaders;
+
+    let generated_shaders = preprocess_shaders(&shaders, &out_dir).unwrap();
 
     validate::validate_shaders(&generated_shaders).unwrap();
 }

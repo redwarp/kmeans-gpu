@@ -1,10 +1,10 @@
 use anyhow::{Ok, Result};
 use args::{Cli, Commands, Extension, Palette};
 use clap::Parser;
-use color_quantization_gpu::{
+use image::{ImageBuffer, Rgba, RgbaImage};
+use kmeans_color_gpu::{
     find, image::Image, palette, reduce, Algorithm, ImageProcessor, ReduceMode, RGBA8,
 };
-use image::{ImageBuffer, Rgba, RgbaImage};
 use pollster::FutureExt;
 use std::{
     borrow::Cow,
