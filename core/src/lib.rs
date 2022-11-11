@@ -2,10 +2,14 @@ use anyhow::{anyhow, Result};
 use palette::{IntoColor, Lab, Pixel, Srgba};
 use rgb::ComponentSlice;
 pub use rgb::RGBA8;
+use std::future::Future;
+use std::sync::mpsc::{channel, Receiver};
+use std::sync::Arc;
+use std::task::Poll;
 use std::{fmt::Display, str::FromStr, time::Instant};
 use wgpu::{
-    Backends, Device, DeviceDescriptor, Features, Instance, PowerPreference, Queue,
-    RequestAdapterOptionsBase,
+    Backends, BufferAsyncError, BufferSlice, Device, DeviceDescriptor, Features, Instance,
+    PowerPreference, Queue, RequestAdapterOptionsBase,
 };
 
 use crate::image::{Container, Image};
@@ -22,7 +26,7 @@ mod utils;
 pub mod image;
 
 pub struct ImageProcessor {
-    device: Device,
+    device: Arc<Device>,
     queue: Queue,
     query_time: bool,
 }
@@ -61,20 +65,20 @@ impl ImageProcessor {
         let query_time = device.features().contains(Features::TIMESTAMP_QUERY);
 
         Ok(Self {
-            device,
+            device: Arc::new(device),
             queue,
             query_time,
         })
     }
 
-    pub fn palette<C: Container>(
+    pub async fn palette<C: Container>(
         &self,
         color_count: u32,
         image: &Image<C>,
         algo: Algorithm,
     ) -> Result<Vec<RGBA8>> {
         match algo {
-            Algorithm::Kmeans => kmeans_palette(self, color_count, image),
+            Algorithm::Kmeans => kmeans_palette(self, color_count, image).await,
             Algorithm::Octree => octree_palette(self, color_count, image),
         }
     }
@@ -260,7 +264,7 @@ impl Display for ReduceMode {
     }
 }
 
-fn kmeans_palette<C: Container>(
+async fn kmeans_palette<C: Container>(
     image_processor: &ImageProcessor,
     color_count: u32,
     image: &Image<C>,
@@ -275,11 +279,12 @@ fn kmeans_palette<C: Container>(
         color_count,
         image_processor.query_time,
     )?
-    .pull_values(
+    .pull_values_async(
         &image_processor.device,
         &image_processor.queue,
         &ColorSpace::Lab,
-    )?;
+    )
+    .await?;
 
     colors.sort_unstable_by(|a, b| {
         let a: Lab = Srgba::from_raw(a.as_slice())
@@ -338,4 +343,43 @@ fn octree_palette<C: Container>(
     });
 
     Ok(colors)
+}
+
+pub struct AsyncData<'a> {
+    buffer_slice: BufferSlice<'a>,
+    device: Arc<Device>,
+    receiver: Receiver<Result<(), BufferAsyncError>>,
+}
+
+impl<'a> AsyncData<'a> {
+    pub fn new(buffer_slice: BufferSlice<'a>, device: Arc<Device>) -> Self {
+        let (sender, receiver) = channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, move |v| {
+            sender.send(v).expect("Sending")
+        });
+
+        AsyncData {
+            buffer_slice,
+            device,
+            receiver,
+        }
+    }
+}
+
+impl<'a> Future for AsyncData<'a> {
+    type Output = Result<Vec<u8>, BufferAsyncError>;
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        self.device.poll(wgpu::MaintainBase::Poll);
+        match self.receiver.try_recv() {
+            Ok(received) => match received {
+                Ok(_) => Poll::Ready(Ok(self.buffer_slice.get_mapped_range().to_vec())),
+                Err(e) => Poll::Ready(Err(e)),
+            },
+            Err(_) => Poll::Pending,
+        }
+    }
 }

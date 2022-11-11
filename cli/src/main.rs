@@ -55,7 +55,7 @@ async fn palette_subcommand2(
 
     let image_processor = ImageProcessor::new().await?;
 
-    let result = image_processor.palette(color_count, &image, algo)?;
+    let result = image_processor.palette(color_count, &image, algo).await?;
 
     let path = palette_file_path(color_count, &input, &output, &algo, size)?;
     save_palette(path, &result, size)?;
