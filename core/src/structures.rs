@@ -13,10 +13,11 @@ use wgpu::{
 };
 
 use crate::{
+    future::AsyncData,
     image::{copied_pixel, Container, Image},
     modules::include_shader,
     utils::{compute_work_group_count, padded_bytes_per_row},
-    AsyncData, ColorSpace,
+    ColorSpace,
 };
 
 const MAX_IMAGE_DIMENSION: u32 = 256;
