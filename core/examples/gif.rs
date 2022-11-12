@@ -28,7 +28,10 @@ fn main() {
     let mut gif_encoder = gif::Encoder::new(&mut gif, width, height, &[]).unwrap();
     gif_encoder.set_repeat(Repeat::Infinite).unwrap();
 
-    for c in 2..16 {
+    let range = 2..16;
+    println!("Generating {x} frames", x = range.len());
+
+    for c in range {
         let reduced = image_processor
             .reduce(c, &image, &Algorithm::Kmeans, &ReduceMode::Replace)
             .block_on()

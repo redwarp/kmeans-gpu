@@ -3,7 +3,7 @@ use palette::{IntoColor, Lab, Pixel, Srgba};
 use rgb::ComponentSlice;
 pub use rgb::RGBA8;
 use std::sync::Arc;
-use std::{fmt::Display, str::FromStr, time::Instant};
+use std::{fmt::Display, str::FromStr};
 use wgpu::{
     Backends, Device, DeviceDescriptor, Features, Instance, PowerPreference, Queue,
     RequestAdapterOptionsBase,
@@ -26,7 +26,6 @@ pub mod image;
 pub struct ImageProcessor {
     device: Arc<Device>,
     queue: Arc<Queue>,
-    query_time: bool,
 }
 
 impl ImageProcessor {
@@ -60,12 +59,10 @@ impl ImageProcessor {
                 None,
             )
             .await?;
-        let query_time = device.features().contains(Features::TIMESTAMP_QUERY);
 
         Ok(Self {
             device: Arc::new(device),
             queue: Arc::new(queue),
-            query_time,
         })
     }
 
@@ -98,7 +95,6 @@ impl ImageProcessor {
                 &input_texture,
                 &ColorSpace::Lab,
                 &centroids_buffer,
-                self.query_time,
             ),
             ReduceMode::Dither => operations::dither_colors(
                 &self.device,
@@ -106,7 +102,6 @@ impl ImageProcessor {
                 &input_texture,
                 &ColorSpace::Lab,
                 &centroids_buffer,
-                self.query_time,
             ),
             ReduceMode::Meld => operations::meld_colors(
                 &self.device,
@@ -114,7 +109,6 @@ impl ImageProcessor {
                 &input_texture,
                 &ColorSpace::Lab,
                 &centroids_buffer,
-                self.query_time,
             ),
         }?
         .pull_image(&self.device, &self.queue)
@@ -137,7 +131,6 @@ impl ImageProcessor {
                 &input_texture,
                 &ColorSpace::Lab,
                 color_count,
-                self.query_time,
             )?,
             Algorithm::Octree => {
                 let palette = octree_palette(self, color_count, image).await?;
@@ -145,14 +138,13 @@ impl ImageProcessor {
             }
         };
 
-        match reduce_mode {
+        let output_texture = match reduce_mode {
             ReduceMode::Replace => operations::find_colors(
                 &self.device,
                 &self.queue,
                 &input_texture,
                 &ColorSpace::Lab,
                 &centroids_buffer,
-                self.query_time,
             ),
             ReduceMode::Dither => operations::dither_colors(
                 &self.device,
@@ -160,7 +152,6 @@ impl ImageProcessor {
                 &input_texture,
                 &ColorSpace::Lab,
                 &centroids_buffer,
-                self.query_time,
             ),
             ReduceMode::Meld => operations::meld_colors(
                 &self.device,
@@ -168,11 +159,10 @@ impl ImageProcessor {
                 &input_texture,
                 &ColorSpace::Lab,
                 &centroids_buffer,
-                self.query_time,
             ),
-        }?
-        .pull_image(&self.device, &self.queue)
-        .await
+        }?;
+
+        output_texture.pull_image(&self.device, &self.queue).await
     }
 }
 
@@ -277,7 +267,6 @@ async fn kmeans_palette<C: Container>(
         &input_texture,
         &ColorSpace::Lab,
         color_count,
-        image_processor.query_time,
     )?
     .pull_values(
         &image_processor.device,
@@ -328,13 +317,7 @@ async fn octree_palette<C: Container>(
         &image.rgba
     };
 
-    let start = Instant::now();
     let mut colors = operations::extract_palette_octree(pixels, color_count)?;
-
-    if image_processor.query_time {
-        let duration = start.elapsed();
-        println!("Time elapsed in octree() is: {duration:?}");
-    }
 
     colors.sort_unstable_by(|a, b| {
         let a: Lab = Srgba::from_raw(a.as_slice())

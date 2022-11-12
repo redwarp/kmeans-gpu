@@ -1,28 +1,26 @@
 use std::{
     future::Future,
-    sync::{
-        mpsc::{channel, Receiver},
-        Arc,
-    },
+    sync::mpsc::{channel, Receiver},
     task::Poll,
 };
 
 use wgpu::{BufferAsyncError, BufferSlice, BufferView, Device};
 
-pub(crate) struct AsyncData<'a> {
+#[must_use]
+pub(crate) struct AsyncBufferView<'a> {
     buffer_slice: BufferSlice<'a>,
-    device: Arc<Device>,
+    device: &'a Device,
     receiver: Receiver<Result<(), BufferAsyncError>>,
 }
 
-impl<'a> AsyncData<'a> {
-    pub fn new(buffer_slice: BufferSlice<'a>, device: Arc<Device>) -> Self {
+impl<'a> AsyncBufferView<'a> {
+    pub fn new(buffer_slice: BufferSlice<'a>, device: &'a Device) -> Self {
         let (sender, receiver) = channel();
         buffer_slice.map_async(wgpu::MapMode::Read, move |v| {
             sender.send(v).expect("Couldn't notify mapping")
         });
 
-        AsyncData {
+        AsyncBufferView {
             buffer_slice,
             device,
             receiver,
@@ -30,7 +28,7 @@ impl<'a> AsyncData<'a> {
     }
 }
 
-impl<'a> Future for AsyncData<'a> {
+impl<'a> Future for AsyncBufferView<'a> {
     type Output = Result<BufferView<'a>, BufferAsyncError>;
 
     fn poll(

@@ -768,8 +768,6 @@ impl<'a> ChooseCentroidModule<'a> {
         const MAX_ITERATION_BEFORE_CONVERGENCE_CHECK: u32 = 8;
         let mut current_iteration = 0;
 
-        println!("Dispatch size {}", self.dispatch_size);
-
         'iteration: for iteration in 0..MAX_ITERATION {
             current_iteration = iteration;
             let mut encoder =
