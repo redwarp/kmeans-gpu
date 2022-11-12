@@ -31,6 +31,7 @@ fn main() {
     for c in 2..16 {
         let reduced = image_processor
             .reduce(c, &image, &Algorithm::Kmeans, &ReduceMode::Replace)
+            .block_on()
             .unwrap();
 
         let mut frame = Frame::from_rgba(width, height, &mut reduced.into_raw_pixels());

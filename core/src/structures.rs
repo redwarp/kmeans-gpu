@@ -1,17 +1,13 @@
 use anyhow::Result;
 use palette::{rgb::Rgba, IntoColor, Lab, Srgb, Srgba};
 use rgb::RGBA8;
-use std::{
-    ops::Deref,
-    sync::{mpsc::channel, Arc},
-    vec,
-};
+use std::{ops::Deref, sync::Arc, vec};
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
     AddressMode, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutEntry, BindingResource,
     BindingType, Buffer, BufferBindingType, BufferUsages, CommandEncoder, CommandEncoderDescriptor,
     ComputePassDescriptor, ComputePipelineDescriptor, Device, Extent3d, FilterMode,
-    ImageDataLayout, MapMode, Queue, ShaderSource, ShaderStages, StorageTextureAccess, Texture,
+    ImageDataLayout, Queue, ShaderSource, ShaderStages, StorageTextureAccess, Texture,
     TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
     TextureViewDescriptor, TextureViewDimension,
 };
@@ -225,7 +221,11 @@ impl InputTexture {
         }
     }
 
-    pub fn pull_image(&self, device: &Device, queue: &Queue) -> Result<Image<Vec<RGBA8>>> {
+    pub async fn pull_image(
+        &self,
+        device: &Arc<Device>,
+        queue: &Queue,
+    ) -> Result<Image<Vec<RGBA8>>> {
         let (width, height) = self.dimensions;
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
 
@@ -233,33 +233,19 @@ impl InputTexture {
 
         queue.submit(Some(encoder.finish()));
 
-        let buffer_slice = output_buffer.slice(..);
-        let (buffer_sender, buffer_receiver) = channel();
-        buffer_slice.map_async(MapMode::Read, move |v| {
-            buffer_sender.send(v).expect("Couldn't send result");
-        });
+        let padded_data = AsyncData::new(output_buffer.slice(..), device.clone()).await?;
 
-        device.poll(wgpu::Maintain::Wait);
-
-        match buffer_receiver.recv() {
-            Ok(Ok(())) => {
-                let padded_data = buffer_slice.get_mapped_range();
-                let mut pixels: Vec<u8> =
-                    vec![0; output_buffer.unpadded_bytes_per_row * height as usize];
-                for (padded, pixels) in padded_data
-                    .chunks_exact(output_buffer.padded_bytes_per_row)
-                    .zip(pixels.chunks_exact_mut(output_buffer.unpadded_bytes_per_row))
-                {
-                    pixels.copy_from_slice(&padded[..output_buffer.unpadded_bytes_per_row]);
-                }
-
-                let result = copied_pixel((width, height), &pixels);
-
-                Ok(result)
-            }
-            Ok(Err(e)) => Err(e.into()),
-            Err(e) => Err(e.into()),
+        let mut pixels: Vec<u8> = vec![0; output_buffer.unpadded_bytes_per_row * height as usize];
+        for (padded, pixels) in padded_data
+            .chunks_exact(output_buffer.padded_bytes_per_row)
+            .zip(pixels.chunks_exact_mut(output_buffer.unpadded_bytes_per_row))
+        {
+            pixels.copy_from_slice(&padded[..output_buffer.unpadded_bytes_per_row]);
         }
+
+        let result = copied_pixel((width, height), &pixels);
+
+        Ok(result)
     }
 }
 
@@ -446,7 +432,11 @@ impl OutputTexture {
         }
     }
 
-    pub fn pull_image(&self, device: &Device, queue: &Queue) -> Result<Image<Vec<RGBA8>>> {
+    pub async fn pull_image(
+        &self,
+        device: &Arc<Device>,
+        queue: &Queue,
+    ) -> Result<Image<Vec<RGBA8>>> {
         let Extent3d {
             width,
             height,
@@ -458,33 +448,19 @@ impl OutputTexture {
 
         queue.submit(Some(encoder.finish()));
 
-        let buffer_slice = output_buffer.slice(..);
-        let (buffer_sender, buffer_receiver) = channel();
-        buffer_slice.map_async(MapMode::Read, move |v| {
-            buffer_sender.send(v).expect("Couldn't send result");
-        });
+        let padded_data = AsyncData::new(output_buffer.slice(..), device.clone()).await?;
 
-        device.poll(wgpu::Maintain::Wait);
-
-        match buffer_receiver.recv() {
-            Ok(Ok(())) => {
-                let padded_data = buffer_slice.get_mapped_range();
-                let mut pixels: Vec<u8> =
-                    vec![0; output_buffer.unpadded_bytes_per_row * height as usize];
-                for (padded, pixels) in padded_data
-                    .chunks_exact(output_buffer.padded_bytes_per_row)
-                    .zip(pixels.chunks_exact_mut(output_buffer.unpadded_bytes_per_row))
-                {
-                    pixels.copy_from_slice(&padded[..output_buffer.unpadded_bytes_per_row]);
-                }
-
-                let result = copied_pixel((width, height), &pixels);
-
-                Ok(result)
-            }
-            Ok(Err(e)) => Err(e.into()),
-            Err(e) => Err(e.into()),
+        let mut pixels: Vec<u8> = vec![0; output_buffer.unpadded_bytes_per_row * height as usize];
+        for (padded, pixels) in padded_data
+            .chunks_exact(output_buffer.padded_bytes_per_row)
+            .zip(pixels.chunks_exact_mut(output_buffer.unpadded_bytes_per_row))
+        {
+            pixels.copy_from_slice(&padded[..output_buffer.unpadded_bytes_per_row]);
         }
+
+        let result = copied_pixel((width, height), &pixels);
+
+        Ok(result)
     }
 }
 
@@ -596,58 +572,7 @@ impl CentroidsBuffer {
         }
     }
 
-    pub fn pull_values(
-        &self,
-        device: &Device,
-        queue: &Queue,
-        color_space: &ColorSpace,
-    ) -> Result<Vec<RGBA8>> {
-        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
-
-        let staging_buffer = self.staging_buffer(device, &mut encoder);
-
-        queue.submit(Some(encoder.finish()));
-
-        let cent_buffer_slice = staging_buffer.slice(..);
-        let (cent_sender, cent_receiver) = channel();
-        cent_buffer_slice.map_async(MapMode::Read, move |v| {
-            cent_sender.send(v).expect("Couldn't send result");
-        });
-
-        device.poll(wgpu::Maintain::Wait);
-
-        match cent_receiver.recv() {
-            Ok(Ok(())) => {
-                let data = cent_buffer_slice.get_mapped_range();
-
-                let colors: Vec<_> = bytemuck::cast_slice::<u8, f32>(&data[16..])
-                    .chunks_exact(4)
-                    .map(|color| {
-                        let raw: Rgba<_, u8> = match color_space {
-                            ColorSpace::Lab => IntoColor::<Srgba>::into_color(Lab::new(
-                                color[0], color[1], color[2],
-                            ))
-                            .into_format(),
-                            ColorSpace::Rgb => {
-                                Srgba::new(color[0], color[1], color[2], 1.0).into_format()
-                            }
-                        };
-                        RGBA8 {
-                            r: raw.red,
-                            g: raw.green,
-                            b: raw.blue,
-                            a: raw.alpha,
-                        }
-                    })
-                    .collect();
-                Ok(colors)
-            }
-            Ok(Err(e)) => Err(e.into()),
-            Err(e) => Err(e.into()),
-        }
-    }
-
-    pub async fn pull_values_async(
+    pub async fn pull_values(
         &self,
         device: &Arc<Device>,
         queue: &Queue,
@@ -663,17 +588,6 @@ impl CentroidsBuffer {
 
         let async_data = AsyncData::new(cent_buffer_slice, device.clone());
         let data = async_data.await?;
-
-        // let (cent_sender, cent_receiver) = channel();
-        // cent_buffer_slice.map_async(MapMode::Read, move |v| {
-        //     cent_sender.send(v).expect("Couldn't send result");
-        // });
-
-        // device.poll(wgpu::Maintain::Wait);
-
-        // match cent_receiver.recv() {
-        //     Ok(Ok(())) => {
-        //         let data = cent_buffer_slice.get_mapped_range();
 
         let colors: Vec<_> = bytemuck::cast_slice::<u8, f32>(&data[16..])
             .chunks_exact(4)
@@ -694,10 +608,6 @@ impl CentroidsBuffer {
             })
             .collect();
         Ok(colors)
-        //     }
-        //     Ok(Err(e)) => Err(e.into()),
-        //     Err(e) => Err(e.into()),
-        // }
     }
 }
 

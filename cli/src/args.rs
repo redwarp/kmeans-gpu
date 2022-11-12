@@ -34,7 +34,7 @@ pub enum Commands {
         #[clap(value_enum, short, long, default_value_t=Algorithm::Kmeans)]
         algo: Algorithm,
         /// Each color will be represented by a square of <SIZE x SIZE>. Between 1 and 60
-        #[clap(short, long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..=60))]
+        #[clap(short, long, default_value_t = 40, value_parser = clap::value_parser!(u32).range(1..=60))]
         size: u32,
     },
     /// Find colors in image that are closest to the replacements, and swap them.

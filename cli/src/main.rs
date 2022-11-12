@@ -81,7 +81,9 @@ async fn find_subcommand(
     let image = to_lib_image(&image);
 
     let image_processor = ImageProcessor::new().await?;
-    let result = image_processor.find(&image, &palette.colors, &reduce_mode)?;
+    let result = image_processor
+        .find(&image, &palette.colors, &reduce_mode)
+        .await?;
 
     let (width, height) = result.dimensions();
 
@@ -106,7 +108,9 @@ async fn reduce_subcommand(
     let image = to_lib_image(&image);
 
     let image_processor = ImageProcessor::new().await?;
-    let result = image_processor.reduce(color_count, &image, &algo, &reduce_mode)?;
+    let result = image_processor
+        .reduce(color_count, &image, &algo, &reduce_mode)
+        .await?;
 
     let (width, height) = result.dimensions();
 
