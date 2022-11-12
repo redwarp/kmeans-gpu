@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::task::Poll;
 use std::{fmt::Display, str::FromStr, time::Instant};
 use wgpu::{
-    Backends, BufferAsyncError, BufferSlice, Device, DeviceDescriptor, Features, Instance,
-    PowerPreference, Queue, RequestAdapterOptionsBase,
+    Backends, BufferAsyncError, BufferSlice, BufferView, Device, DeviceDescriptor, Features,
+    Instance, PowerPreference, Queue, RequestAdapterOptionsBase,
 };
 
 use crate::image::{Container, Image};
@@ -27,7 +27,7 @@ pub mod image;
 
 pub struct ImageProcessor {
     device: Arc<Device>,
-    queue: Queue,
+    queue: Arc<Queue>,
     query_time: bool,
 }
 
@@ -66,7 +66,7 @@ impl ImageProcessor {
 
         Ok(Self {
             device: Arc::new(device),
-            queue,
+            queue: Arc::new(queue),
             query_time,
         })
     }
@@ -79,11 +79,11 @@ impl ImageProcessor {
     ) -> Result<Vec<RGBA8>> {
         match algo {
             Algorithm::Kmeans => kmeans_palette(self, color_count, image).await,
-            Algorithm::Octree => octree_palette(self, color_count, image),
+            Algorithm::Octree => octree_palette(self, color_count, image).await,
         }
     }
 
-    pub fn find<C: Container>(
+    pub async fn find<C: Container>(
         &self,
         image: &Image<C>,
         colors: &[RGBA8],
@@ -120,9 +120,10 @@ impl ImageProcessor {
             ),
         }?
         .pull_image(&self.device, &self.queue)
+        .await
     }
 
-    pub fn reduce<C: Container>(
+    pub async fn reduce<C: Container>(
         &self,
         color_count: u32,
         image: &Image<C>,
@@ -141,7 +142,7 @@ impl ImageProcessor {
                 self.query_time,
             )?,
             Algorithm::Octree => {
-                let palette = octree_palette(self, color_count, image)?;
+                let palette = octree_palette(self, color_count, image).await?;
                 CentroidsBuffer::fixed_centroids(&palette, &ColorSpace::Lab, &self.device)
             }
         };
@@ -173,6 +174,7 @@ impl ImageProcessor {
             ),
         }?
         .pull_image(&self.device, &self.queue)
+        .await
     }
 }
 
@@ -279,7 +281,7 @@ async fn kmeans_palette<C: Container>(
         color_count,
         image_processor.query_time,
     )?
-    .pull_values_async(
+    .pull_values(
         &image_processor.device,
         &image_processor.queue,
         &ColorSpace::Lab,
@@ -298,7 +300,7 @@ async fn kmeans_palette<C: Container>(
     Ok(colors)
 }
 
-fn octree_palette<C: Container>(
+async fn octree_palette<C: Container>(
     image_processor: &ImageProcessor,
     color_count: u32,
     image: &Image<C>,
@@ -313,7 +315,11 @@ fn octree_palette<C: Container>(
             image,
         )
         .resized(MAX_SIZE, &image_processor.device, &image_processor.queue);
-        Some(input_texture.pull_image(&image_processor.device, &image_processor.queue)?)
+        Some(
+            input_texture
+                .pull_image(&image_processor.device, &image_processor.queue)
+                .await?,
+        )
     } else {
         None
     };
@@ -355,7 +361,7 @@ impl<'a> AsyncData<'a> {
     pub fn new(buffer_slice: BufferSlice<'a>, device: Arc<Device>) -> Self {
         let (sender, receiver) = channel();
         buffer_slice.map_async(wgpu::MapMode::Read, move |v| {
-            sender.send(v).expect("Sending")
+            sender.send(v).expect("Couldn't notify mapping")
         });
 
         AsyncData {
@@ -367,19 +373,22 @@ impl<'a> AsyncData<'a> {
 }
 
 impl<'a> Future for AsyncData<'a> {
-    type Output = Result<Vec<u8>, BufferAsyncError>;
+    type Output = Result<BufferView<'a>, BufferAsyncError>;
 
     fn poll(
         self: std::pin::Pin<&mut Self>,
-        _cx: &mut std::task::Context<'_>,
+        cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         self.device.poll(wgpu::MaintainBase::Poll);
         match self.receiver.try_recv() {
             Ok(received) => match received {
-                Ok(_) => Poll::Ready(Ok(self.buffer_slice.get_mapped_range().to_vec())),
+                Ok(_) => Poll::Ready(Ok(self.buffer_slice.get_mapped_range())),
                 Err(e) => Poll::Ready(Err(e)),
             },
-            Err(_) => Poll::Pending,
+            Err(_) => {
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            }
         }
     }
 }
