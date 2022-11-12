@@ -13,7 +13,7 @@ use wgpu::{
 };
 
 use crate::{
-    future::AsyncData,
+    future::AsyncBufferView,
     image::{copied_pixel, Container, Image},
     modules::include_shader,
     utils::{compute_work_group_count, padded_bytes_per_row},
@@ -234,7 +234,7 @@ impl InputTexture {
 
         queue.submit(Some(encoder.finish()));
 
-        let padded_data = AsyncData::new(output_buffer.slice(..), device.clone()).await?;
+        let padded_data = AsyncBufferView::new(output_buffer.slice(..), device).await?;
 
         let mut pixels: Vec<u8> = vec![0; output_buffer.unpadded_bytes_per_row * height as usize];
         for (padded, pixels) in padded_data
@@ -449,7 +449,7 @@ impl OutputTexture {
 
         queue.submit(Some(encoder.finish()));
 
-        let padded_data = AsyncData::new(output_buffer.slice(..), device.clone()).await?;
+        let padded_data = AsyncBufferView::new(output_buffer.slice(..), device).await?;
 
         let mut pixels: Vec<u8> = vec![0; output_buffer.unpadded_bytes_per_row * height as usize];
         for (padded, pixels) in padded_data
@@ -587,7 +587,7 @@ impl CentroidsBuffer {
 
         let cent_buffer_slice = staging_buffer.slice(..);
 
-        let async_data = AsyncData::new(cent_buffer_slice, device.clone());
+        let async_data = AsyncBufferView::new(cent_buffer_slice, device);
         let data = async_data.await?;
 
         let colors: Vec<_> = bytemuck::cast_slice::<u8, f32>(&data[16..])
