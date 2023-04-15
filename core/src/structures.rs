@@ -44,6 +44,7 @@ impl InputTexture {
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba8Unorm,
             usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            view_formats: &[],
         });
 
         queue.write_texture(
@@ -103,6 +104,7 @@ impl InputTexture {
             usage: TextureUsages::TEXTURE_BINDING
                 | TextureUsages::COPY_SRC
                 | TextureUsages::STORAGE_BINDING,
+            view_formats: &[],
         });
 
         let resize_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -276,6 +278,7 @@ impl WorkTexture {
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba32Float,
             usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         });
 
         Self(texture)
@@ -334,6 +337,7 @@ impl ColorIndexTexture {
             dimension: TextureDimension::D2,
             format: TextureFormat::R32Uint,
             usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
+            view_formats: &[],
         });
 
         Self(texture)
@@ -382,6 +386,7 @@ impl OutputTexture {
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba8Unorm,
             usage: TextureUsages::COPY_SRC | TextureUsages::STORAGE_BINDING,
+            view_formats: &[],
         });
 
         Self {

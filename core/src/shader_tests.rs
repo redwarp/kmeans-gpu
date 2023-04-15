@@ -133,7 +133,10 @@ fn vec3x2_as_input_f32_as_output(
 
 fn run_wgpu_test<T>(test_function: impl FnOnce(&TestingContext) -> T) -> T {
     let backend_bits = util::backend_bits_from_env().unwrap_or_else(Backends::all);
-    let instance = Instance::new(backend_bits);
+    let instance = Instance::new(wgpu::InstanceDescriptor {
+        backends: backend_bits,
+        dx12_shader_compiler: wgpu::Dx12Compiler::default(),
+    });
     let adapter = pollster::block_on(util::initialize_adapter_from_env_or_default(
         &instance,
         backend_bits,

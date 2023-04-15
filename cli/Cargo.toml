@@ -17,11 +17,11 @@ image = { version = "0.24", default-features = false, features = [
     "jpeg"
 ] }
 anyhow = "1.0"
-pollster = "0.2"
-clap = { version = "4.0", features = ["cargo", "derive"] }
+pollster = "0.3"
+clap = { version = "4.2", features = ["cargo", "derive"] }
 log = "0.4"
 env_logger = "0.10"
 regex = "1.7"
 kmeans-color-gpu = { path = "../core" }
-bytemuck = "1.12"
+bytemuck = "1.13"
 rgb = "0.8"

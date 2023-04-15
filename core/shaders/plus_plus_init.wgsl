@@ -9,13 +9,13 @@ struct Candidate {
     distance: f32,
 };
 
-let FLAG_NOT_READY = 0u;
-let FLAG_AGGREGATE_READY = 1u;
-let FLAG_PREFIX_READY = 2u;
-let N_SEQ = 16u;
-let workgroup_size: u32 = 256u;
-let max_f32: f32 = 4294967295.0;
-let max_int : u32 = 4294967295u;
+const FLAG_NOT_READY = 0u;
+const FLAG_AGGREGATE_READY = 1u;
+const FLAG_PREFIX_READY = 2u;
+const N_SEQ = 16u;
+const workgroup_size: u32 = 256u;
+const max_f32: f32 = 4294967295.0;
+const max_int : u32 = 4294967295u;
 
 @group(0) @binding(0) var<storage, read_write> centroids: Centroids;
 @group(0) @binding(1) var pixels: texture_2d<f32>;

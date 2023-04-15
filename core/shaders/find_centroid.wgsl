@@ -7,8 +7,8 @@ struct Centroids {
 @group(0) @binding(1) var<storage, read> centroids: Centroids;
 @group(0) @binding(2) var color_indices: texture_storage_2d<r32uint, write>;
 
-let max_int : u32 = 4294967295u;
-let max_f32: f32 = 100000.0;
+const max_int : u32 = 4294967295u;
+const max_f32: f32 = 100000.0;
 
 // #include functions/delta_e.wgsl
 

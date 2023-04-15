@@ -2,7 +2,7 @@
 @group(0) @binding(1) var output_texture : texture_storage_2d<rgba32float, write>;
 
 // sRGB factors, see http://www.brucelindbloom.com/
-let RGB_TO_XYZ_MATRIX = mat3x3<f32>(
+const RGB_TO_XYZ_MATRIX = mat3x3<f32>(
     vec3<f32>(0.4124564, 0.2126729, 0.0193339),
     vec3<f32>(0.3575761, 0.7151522, 0.1191920),
     vec3<f32>(0.1804375, 0.0721750, 0.9503041)

@@ -890,6 +890,7 @@ impl DistanceMapTexture {
             dimension: TextureDimension::D2,
             format: TextureFormat::R32Float,
             usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
+            view_formats: &[],
         });
 
         Self(texture)

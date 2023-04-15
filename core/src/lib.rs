@@ -5,8 +5,7 @@ pub use rgb::RGBA8;
 use std::sync::Arc;
 use std::{fmt::Display, str::FromStr};
 use wgpu::{
-    Backends, Device, DeviceDescriptor, Features, Instance, PowerPreference, Queue,
-    RequestAdapterOptionsBase,
+    Device, DeviceDescriptor, Features, Instance, PowerPreference, Queue, RequestAdapterOptionsBase,
 };
 
 use crate::image::{Container, Image};
@@ -38,7 +37,7 @@ impl ImageProcessor {
     /// let image_processor = ImageProcessor::new().block_on();
     /// ```
     pub async fn new() -> Result<Self> {
-        let instance = Instance::new(Backends::all());
+        let instance = Instance::default();
         let adapter = instance
             .request_adapter(&RequestAdapterOptionsBase {
                 power_preference: PowerPreference::HighPerformance,

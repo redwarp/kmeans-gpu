@@ -24,15 +24,15 @@ struct ColorAggregator {
 @group(1) @binding(3) var<uniform> settings: Settings;
 @group(2) @binding(0) var<uniform> k_index: u32;
 
-let workgroup_size: u32 = 256u;
+const workgroup_size: u32 = 256u;
 
 var<workgroup> scratch: array<ColorAggregator, workgroup_size>;
 var<workgroup> shared_flag: u32;
 var<workgroup> part_id: u32;
 
-let FLAG_NOT_READY = 0u;
-let FLAG_AGGREGATE_READY = 1u;
-let FLAG_PREFIX_READY = 2u;
+const FLAG_NOT_READY = 0u;
+const FLAG_AGGREGATE_READY = 1u;
+const FLAG_PREFIX_READY = 2u;
 
 fn coords(global_x: u32, dimensions: vec2<i32>) -> vec2<i32> {
     return vec2<i32>(vec2<u32>(global_x % u32(dimensions.x), global_x / u32(dimensions.x)));

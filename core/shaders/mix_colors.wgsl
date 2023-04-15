@@ -11,7 +11,7 @@ struct Centroids {
 @group(0) @binding(2) var color_indices: texture_2d<u32>;
 @group(0) @binding(3) var<storage, read> centroids: Centroids;
 
-let index_matrix: array<i32, 16> = array<i32, 16>(0,  8,  2,  10,
+const index_matrix: array<i32, 16> = array<i32, 16>(0,  8,  2,  10,
                                                   12, 4,  14, 6,
                                                   3,  11, 1,  9,
                                                   15, 7,  13, 5);
