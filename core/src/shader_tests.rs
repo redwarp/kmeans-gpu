@@ -138,9 +138,7 @@ fn run_wgpu_test<T>(test_function: impl FnOnce(&TestingContext) -> T) -> T {
         dx12_shader_compiler: wgpu::Dx12Compiler::default(),
     });
     let adapter = pollster::block_on(util::initialize_adapter_from_env_or_default(
-        &instance,
-        backend_bits,
-        None,
+        &instance, None,
     ))
     .expect("could not find suitable adapter on the system");
 

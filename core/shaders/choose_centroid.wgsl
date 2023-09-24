@@ -34,19 +34,19 @@ const FLAG_NOT_READY = 0u;
 const FLAG_AGGREGATE_READY = 1u;
 const FLAG_PREFIX_READY = 2u;
 
-fn coords(global_x: u32, dimensions: vec2<i32>) -> vec2<i32> {
-    return vec2<i32>(vec2<u32>(global_x % u32(dimensions.x), global_x / u32(dimensions.x)));
+fn coords(global_x: u32, dimensions: vec2<u32>) -> vec2<u32> {
+    return vec2<u32>(global_x % dimensions.x, global_x / dimensions.x);
 }
 
 fn last_group_idx() -> u32 {
     return arrayLength(&flag_buffer) - 1u;
 }
 
-fn in_bounds(global_x: u32, dimensions: vec2<i32>) -> bool {
-    return global_x < u32(dimensions.x) * u32(dimensions.y);
+fn in_bounds(global_x: u32, dimensions: vec2<u32>) -> bool {
+    return global_x < dimensions.x * dimensions.y;
 }
 
-fn matches_centroid(k: u32, coords: vec2<i32>) -> bool {
+fn matches_centroid(k: u32, coords: vec2<u32>) -> bool {
     return k == textureLoad(color_indices, coords, 0).r;
 }
 
@@ -180,7 +180,6 @@ fn main(
 @compute
 @workgroup_size(1)
 fn pick() {
-    let dimensions = textureDimensions(pixels);
     let sum = atomicLoadAggregator(last_group_idx() * 8u + 0u);
     let k = k_index;
     if(sum.count > 0u) {

@@ -71,7 +71,7 @@ fn main(
     @builtin(global_invocation_id) global_id : vec3<u32>,
 ) {
     let dimensions = textureDimensions(output_texture);
-    let coords = vec2<i32>(global_id.xy);
+    let coords = global_id.xy;
 
     if(coords.x >= dimensions.x || coords.y >= dimensions.y) {
         return;

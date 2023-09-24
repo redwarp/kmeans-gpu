@@ -52,7 +52,7 @@ impl InputTexture {
             bytemuck::cast_slice(&image.rgba),
             ImageDataLayout {
                 offset: 0,
-                bytes_per_row: std::num::NonZeroU32::new(4 * width),
+                bytes_per_row: Some(4 * width),
                 rows_per_image: None,
             },
             texture_size,
@@ -206,8 +206,8 @@ impl InputTexture {
                 buffer: &buffer,
                 layout: wgpu::ImageDataLayout {
                     offset: 0,
-                    bytes_per_row: std::num::NonZeroU32::new(padded_bytes_per_row as u32),
-                    rows_per_image: std::num::NonZeroU32::new(height),
+                    bytes_per_row: Some(padded_bytes_per_row as u32),
+                    rows_per_image: None,
                 },
             },
             wgpu::Extent3d {
@@ -424,8 +424,8 @@ impl OutputTexture {
                 buffer: &buffer,
                 layout: wgpu::ImageDataLayout {
                     offset: 0,
-                    bytes_per_row: std::num::NonZeroU32::new(padded_bytes_per_row as u32),
-                    rows_per_image: std::num::NonZeroU32::new(height),
+                    bytes_per_row: Some(padded_bytes_per_row as u32),
+                    rows_per_image: None,
                 },
             },
             self.texture_size,

@@ -8,7 +8,7 @@ fn main(
   @builtin(global_invocation_id) global_id : vec3<u32>,
 ) {
     let dimensions = textureDimensions(output_texture);
-    if(i32(global_id.x) >= dimensions.x || i32(global_id.y) >= dimensions.y) {
+    if(global_id.x >= dimensions.x || global_id.y >= dimensions.y) {
         return;
     }
 

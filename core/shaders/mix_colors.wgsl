@@ -11,17 +11,17 @@ struct Centroids {
 @group(0) @binding(2) var color_indices: texture_2d<u32>;
 @group(0) @binding(3) var<storage, read> centroids: Centroids;
 
-const index_matrix: array<i32, 16> = array<i32, 16>(0,  8,  2,  10,
-                                                  12, 4,  14, 6,
-                                                  3,  11, 1,  9,
-                                                  15, 7,  13, 5);
+const index_matrix: array<u32, 16> = array<u32, 16>(0u,  8u,  2u,  10u,
+                                                    12u, 4u,  14u, 6u,
+                                                    3u,  11u, 1u,  9u,
+                                                    15u, 7u,  13u, 5u);
 
 // #include functions/delta_e.wgsl
 
-fn index_value(coords: vec2<i32>) -> f32 {
-    let x = coords.x % 4;
-    let y = coords.y % 4;
-    let index = x + y * 4;
+fn index_value(coords: vec2<u32>) -> f32 {
+    let x = coords.x % 4u;
+    let y = coords.y % 4u;
+    let index = x + y * 4u;
     var mine = index_matrix;
     return f32(mine[index]) / 16.0;
 }
@@ -47,7 +47,7 @@ fn two_closest_colors(color: vec4<f32>) -> array<vec4<f32>, 2> {
     return values;
 }
 
-fn dither(color: vec4<f32>, coords: vec2<i32>) -> vec4<f32> {
+fn dither(color: vec4<f32>, coords: vec2<u32>) -> vec4<f32> {
     // Based on https://en.wikipedia.org/wiki/Ordered_dithering
     // Maybe this threshold should be computed by a different shader first?
     var color_a: vec3<f32> = centroids.data[0].rgb;
@@ -82,7 +82,7 @@ fn dither(color: vec4<f32>, coords: vec2<i32>) -> vec4<f32> {
     return vec4<f32>(closest, 1.0);
 }
 
-fn meld(color: vec4<f32>, coords: vec2<i32>) -> vec4<f32> {
+fn meld(color: vec4<f32>, coords: vec2<u32>) -> vec4<f32> {
     let closest_colors = two_closest_colors(color);
     let factor = distance_cie94(color.rgb, closest_colors[1].rgb) / distance_cie94(closest_colors[0].rgb, closest_colors[1].rgb);
 
@@ -95,9 +95,9 @@ fn main_dither(
     @builtin(global_invocation_id) global_id : vec3<u32>,
 ) {
     let dimensions = textureDimensions(output_texture);
-    let coords = vec2<i32>(global_id.xy);
+    let coords = global_id.xy;
 
-    if(coords.x >= dimensions.x || coords.y >= dimensions.y) {
+    if (coords.x >= dimensions.x || coords.y >= dimensions.y) {
         return;
     }
     
@@ -118,9 +118,9 @@ fn main_meld(
     @builtin(global_invocation_id) global_id : vec3<u32>,
 ) {
     let dimensions = textureDimensions(output_texture);
-    let coords = vec2<i32>(global_id.xy);
+    let coords = global_id.xy;
 
-    if(coords.x >= dimensions.x || coords.y >= dimensions.y) {
+    if (coords.x >= dimensions.x || coords.y >= dimensions.y) {
         return;
     }
 

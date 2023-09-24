@@ -29,23 +29,23 @@ var<workgroup> scratch: array<Candidate, workgroup_size>;
 var<workgroup> shared_flag: u32;
 var<workgroup> part_id: u32;
 
-fn coords(pixel_index: u32, dimensions: vec2<i32>) -> vec2<i32> {
-    return vec2<i32>(vec2<u32>(pixel_index % u32(dimensions.x), pixel_index / u32(dimensions.x)));
+fn coords(pixel_index: u32, dimensions: vec2<u32>) -> vec2<u32> {
+    return vec2<u32>(pixel_index % dimensions.x, pixel_index / dimensions.x);
 }
 
 fn last_group_idx() -> u32 {
     return arrayLength(&flag_buffer) - 1u;
 }
 
-fn in_bounds(pixel_index: u32, dimensions: vec2<i32>) -> bool {
-    return pixel_index < u32(dimensions.x) * u32(dimensions.y);
+fn in_bounds(pixel_index: u32, dimensions: vec2<u32>) -> bool {
+    return pixel_index < dimensions.x * dimensions.y;
 }
 
 fn atomicStoreCandidate(index: u32, value: Candidate) {
     atomicStore(&prefix_buffer[index], value.index);
 }
 
-fn atomicLoadCandidate(index: u32, dimensions: vec2<i32>) -> Candidate {
+fn atomicLoadCandidate(index: u32, dimensions: vec2<u32>) -> Candidate {
     var output: Candidate;
     output.index = atomicLoad(&prefix_buffer[index]);
 
@@ -78,7 +78,7 @@ fn main(
     let workgroup_x = part_id;
 
     let dimensions = textureDimensions(pixels);
-    let width = u32(dimensions.x);
+    let width = dimensions.x;
     let global_x = workgroup_x * workgroup_size + local_id.x;
 
     var local = Candidate(0u, 0.0);

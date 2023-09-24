@@ -39,7 +39,10 @@ pub fn validate_shaders(shaders: &[PathBuf]) -> anyhow::Result<()> {
 
             match naga::valid::Validator::new(validation_flags, validation_caps).validate(&module) {
                 Ok(_) => println!("Shader {filename} is valid"),
-                Err(e) => emit_annotated_error(&e, filename, &shader),
+                Err(e) => {
+                    eprintln!("Shader {filename} invalid");
+                    emit_annotated_error(&e, filename, &shader);
+                }
             }
         }
     }

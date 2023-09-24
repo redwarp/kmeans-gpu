@@ -1,5 +1,5 @@
 use log::{debug, log_enabled};
-use std::{num::NonZeroU32, sync::mpsc::channel};
+use std::sync::mpsc::channel;
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
@@ -97,7 +97,6 @@ impl ColorConverterModule {
                             format: Some(TextureFormat::Rgba8Unorm),
                             aspect: wgpu::TextureAspect::All,
                             base_mip_level: 0,
-                            mip_level_count: NonZeroU32::new(1),
                             dimension: Some(TextureViewDimension::D2),
                             ..Default::default()
                         },
@@ -214,7 +213,6 @@ impl ColorReverterModule {
                             format: Some(TextureFormat::Rgba8Unorm),
                             aspect: wgpu::TextureAspect::All,
                             base_mip_level: 0,
-                            mip_level_count: NonZeroU32::new(1),
                             dimension: Some(TextureViewDimension::D2),
                             ..Default::default()
                         },
