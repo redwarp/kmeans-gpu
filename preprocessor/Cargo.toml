@@ -3,14 +3,12 @@ name = "kmeans-color-gpu-preprocessor"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-readme.workspace = true
 license.workspace = true
 repository.workspace = true
-categories.workspace = true
-description = "A shader preprocessor, to replace #includes in shaders by appropriate files."
+description = "A shader preprocessor, to replace #includes in shaders by appropriate files used for the kmeans-color-gpu crate."
 
 [dependencies]
-regex = "1.7"
+regex = "1.9"
 pathdiff = "0.2"
 anyhow = "1.0"
 naga = { version = "0.13", optional = true, features = ["validate", "wgsl-in"] }

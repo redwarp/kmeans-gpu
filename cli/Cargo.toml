@@ -14,7 +14,7 @@ description = "Command line tool to use the color-quantization-gpu library"
 [dependencies]
 image = { version = "0.24", default-features = false, features = [
     "png",
-    "jpeg"
+    "jpeg",
 ] }
 anyhow = "1.0"
 pollster = "0.3"
@@ -22,6 +22,6 @@ clap = { version = "4.2", features = ["cargo", "derive"] }
 log = "0.4"
 env_logger = "0.10"
 regex = "1.7"
-kmeans-color-gpu = { path = "../core" }
+kmeans-color-gpu.workspace = true
 bytemuck = "1.13"
 rgb = "0.8"

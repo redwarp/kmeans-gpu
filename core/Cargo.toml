@@ -25,4 +25,4 @@ image = { version = "0.24", default-features = false, features = ["png"] }
 gif = "0.12"
 
 [build-dependencies]
-kmeans-color-gpu-preprocessor = { path = "../preprocessor" }
+kmeans-color-gpu-preprocessor.workspace = true

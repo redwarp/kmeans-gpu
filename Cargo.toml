@@ -12,3 +12,7 @@ license = "MIT"
 repository = "https://github.com/redwarp/k-means-gpu"
 categories = ["graphics", "multimedia::images"]
 exclude = ["gfx", ".vscode"]
+
+[workspace.dependencies]
+kmeans-color-gpu = { version = "0.1.0", path = "./core" }
+kmeans-color-gpu-preprocessor = { version = "0.1.0", path = "./preprocessor" }
