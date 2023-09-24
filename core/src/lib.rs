@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Result};
-use palette::{IntoColor, Lab, Pixel, Srgba};
-use rgb::ComponentSlice;
+use palette::{IntoColor, Lab, Srgba};
 pub use rgb::RGBA8;
 use std::sync::Arc;
 use std::{fmt::Display, str::FromStr};
@@ -275,10 +274,10 @@ async fn kmeans_palette<C: Container>(
     .await?;
 
     colors.sort_unstable_by(|a, b| {
-        let a: Lab = Srgba::from_raw(a.as_slice())
+        let a: Lab = Srgba::new(a.r, a.g, a.b, a.a)
             .into_format::<_, f32>()
             .into_color();
-        let b: Lab = Srgba::from_raw(b.as_slice())
+        let b: Lab = Srgba::new(b.r, b.g, b.b, b.a)
             .into_format::<_, f32>()
             .into_color();
         a.l.partial_cmp(&b.l).unwrap()
@@ -319,10 +318,10 @@ async fn octree_palette<C: Container>(
     let mut colors = operations::extract_palette_octree(pixels, color_count)?;
 
     colors.sort_unstable_by(|a, b| {
-        let a: Lab = Srgba::from_raw(a.as_slice())
+        let a: Lab = Srgba::new(a.r, a.g, a.b, a.a)
             .into_format::<_, f32>()
             .into_color();
-        let b: Lab = Srgba::from_raw(b.as_slice())
+        let b: Lab = Srgba::new(b.r, b.g, b.b, b.a)
             .into_format::<_, f32>()
             .into_color();
         a.l.partial_cmp(&b.l).unwrap()

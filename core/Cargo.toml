@@ -15,7 +15,7 @@ description = "Calculates the average colors in an image for color quantization 
 wgpu = "0.15"
 bytemuck = { version = "1.12", features = ["derive", "extern_crate_alloc"] }
 anyhow = "1.0"
-palette = "0.6"
+palette = "0.7"
 log = "0.4"
 rgb = { version = "0.8", features = ["as-bytes"] }
 
