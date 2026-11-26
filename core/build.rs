@@ -8,7 +8,7 @@ fn main() {
 
     let shaders = Path::new("shaders");
 
-    preprocess_shaders(&shaders, &out_dir).unwrap();
+    preprocess_shaders(shaders, &out_dir).unwrap();
 
     println!(
         "cargo:rerun-if-changed={path}",

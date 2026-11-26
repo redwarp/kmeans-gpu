@@ -1,10 +1,10 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use palette::{IntoColor, Lab, Srgba};
 pub use rgb::RGBA8;
 use std::sync::Arc;
 use std::{fmt::Display, str::FromStr};
 use wgpu::{
-    Device, DeviceDescriptor, Features, Instance, PowerPreference, Queue, RequestAdapterOptionsBase,
+    Device, DeviceDescriptor, Features, Instance, PowerPreference, Queue, RequestAdapterOptions,
 };
 
 use crate::image::{Container, Image};
@@ -38,24 +38,19 @@ impl ImageProcessor {
     pub async fn new() -> Result<Self> {
         let instance = Instance::default();
         let adapter = instance
-            .request_adapter(&RequestAdapterOptionsBase {
+            .request_adapter(&RequestAdapterOptions {
                 power_preference: PowerPreference::HighPerformance,
-                force_fallback_adapter: false,
-                compatible_surface: None,
+                ..Default::default()
             })
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Couldn't create the adapter"))?;
+            .await?;
 
         let features = adapter.features();
         let (device, queue) = adapter
-            .request_device(
-                &DeviceDescriptor {
-                    label: None,
-                    features: features & (Features::TIMESTAMP_QUERY),
-                    limits: Default::default(),
-                },
-                None,
-            )
+            .request_device(&DeviceDescriptor {
+                label: None,
+                required_features: features & (Features::TIMESTAMP_QUERY),
+                ..Default::default()
+            })
             .await?;
 
         Ok(Self {

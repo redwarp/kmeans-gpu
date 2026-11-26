@@ -3,13 +3,13 @@ use rgb::RGBA8;
 use wgpu::{CommandEncoderDescriptor, ComputePassDescriptor, Device, Queue};
 
 use crate::{
+    CentroidsBuffer, ColorSpace, InputTexture,
     modules::{
         ChooseCentroidModule, ColorConverterModule, ColorReverterModule, FindCentroidModule,
         MixColorsModule, MixMode, Module, PlusPlusInitModule, SwapModule,
     },
     octree::ColorTree,
     structures::{ColorIndexTexture, OutputTexture, WorkTexture},
-    CentroidsBuffer, ColorSpace, InputTexture,
 };
 
 pub(crate) fn extract_palette_kmeans(
@@ -65,24 +65,26 @@ pub(crate) fn extract_palette_kmeans(
     {
         let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
             label: Some("Init pass"),
+            timestamp_writes: None,
         });
         color_converter_module.dispatch(&mut compute_pass);
     }
     queue.submit(Some(encoder.finish()));
 
-    plus_plus_init_module.compute(device, queue);
+    plus_plus_init_module.compute(device, queue)?;
 
     let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
     {
         let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
             label: Some("Init pass"),
+            timestamp_writes: None,
         });
         find_centroid_module.dispatch(&mut compute_pass);
     }
 
     queue.submit(Some(encoder.finish()));
 
-    choose_centroid_module.compute(device, queue);
+    choose_centroid_module.compute(device, queue)?;
 
     Ok(centroids_buffer)
 }
@@ -136,6 +138,7 @@ pub(crate) fn dither_colors(
     {
         let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
             label: Some("Init pass"),
+            timestamp_writes: None,
         });
         color_converter_module.dispatch(&mut compute_pass);
     }
@@ -145,6 +148,7 @@ pub(crate) fn dither_colors(
     {
         let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
             label: Some("Swap and fetch result pass"),
+            timestamp_writes: None,
         });
         mix_colors_module.dispatch(&mut compute_pass);
         color_reverter_module.dispatch(&mut compute_pass);
@@ -194,6 +198,7 @@ pub(crate) fn meld_colors(
     {
         let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
             label: Some("Init pass"),
+            timestamp_writes: None,
         });
         color_converter_module.dispatch(&mut compute_pass);
     }
@@ -203,6 +208,7 @@ pub(crate) fn meld_colors(
     {
         let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
             label: Some("Swap and fetch result pass"),
+            timestamp_writes: None,
         });
         mix_colors_module.dispatch(&mut compute_pass);
         color_reverter_module.dispatch(&mut compute_pass);
@@ -258,6 +264,7 @@ pub(crate) fn find_colors(
     {
         let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
             label: Some("Init pass"),
+            timestamp_writes: None,
         });
         color_converter_module.dispatch(&mut compute_pass);
         find_centroid_module.dispatch(&mut compute_pass);

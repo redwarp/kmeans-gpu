@@ -13,40 +13,23 @@ env:
 jobs:
   build:
     name: Test rust
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v7
 
       - name: Install rust stable
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
-          override: true
-          components: llvm-tools-preview
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Install swiftshader
-        shell: bash
-        run: |
-          set -e
-
-          mkdir -p swiftshader
-          curl -LsSf https://github.com/gfx-rs/ci-build/releases/latest/download/swiftshader-linux-x86_64.tar.xz | tar -xf - -C swiftshader
-          echo "LD_LIBRARY_PATH=$PWD/swiftshader" >> $GITHUB_ENV
-
-      - name: Install llvmpipe, vulkan sdk
+      # Lavapipe is mesa's software vulkan implementation, so tests can run without a GPU.
+      - name: Install lavapipe
         shell: bash
         run: |
           set -e
 
           sudo apt-get update -y -qq
-          # vulkan sdk
-          wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
-          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
-          sudo apt-get update
-          sudo apt install -y libegl1-mesa libgl1-mesa-dri libxcb-xfixes0-dev vulkan-sdk
+          sudo apt-get install -y libvulkan1 mesa-vulkan-drivers
 
       - name: Disable debug
         shell: bash

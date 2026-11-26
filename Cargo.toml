@@ -1,17 +1,16 @@
 [workspace]
 members = ["core", "cli", "preprocessor"]
 default-members = ["cli", "core"]
-resolver = "2"
+resolver = "3"
 
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 authors = ["Benoit Vermont <redwarp@gmail.com>"]
 readme = "README.md"
 license = "MIT"
 repository = "https://github.com/redwarp/k-means-gpu"
 categories = ["graphics", "multimedia::images"]
-exclude = ["gfx", ".vscode"]
 
 [workspace.dependencies]
 kmeans-color-gpu = { version = "0.1.0", path = "./core" }

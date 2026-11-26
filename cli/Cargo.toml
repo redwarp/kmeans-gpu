@@ -12,16 +12,16 @@ description = "Command line tool to use the color-quantization-gpu library"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
-image = { version = "0.24", default-features = false, features = [
+image = { version = "0.25", default-features = false, features = [
     "png",
     "jpeg",
 ] }
 anyhow = "1.0"
-pollster = "0.3"
-clap = { version = "4.2", features = ["cargo", "derive"] }
+pollster = "1.0"
+clap = { version = "4.6", features = ["cargo", "derive"] }
 log = "0.4"
-env_logger = "0.10"
-regex = "1.7"
+env_logger = "0.11"
+regex = "1.13"
 kmeans-color-gpu.workspace = true
-bytemuck = "1.13"
+bytemuck = "1.25"
 rgb = "0.8"

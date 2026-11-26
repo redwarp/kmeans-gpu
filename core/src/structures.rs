@@ -1,23 +1,23 @@
 use anyhow::Result;
-use palette::{rgb::Rgba, IntoColor, Lab, Srgb, Srgba};
+use palette::{IntoColor, Lab, Srgb, Srgba, rgb::Rgba};
 use rgb::RGBA8;
 use std::{ops::Deref, sync::Arc, vec};
 use wgpu::{
-    util::{BufferInitDescriptor, DeviceExt},
     AddressMode, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutEntry, BindingResource,
     BindingType, Buffer, BufferBindingType, BufferUsages, CommandEncoder, CommandEncoderDescriptor,
-    ComputePassDescriptor, ComputePipelineDescriptor, Device, Extent3d, FilterMode,
-    ImageDataLayout, Queue, ShaderSource, ShaderStages, StorageTextureAccess, Texture,
+    ComputePassDescriptor, ComputePipelineDescriptor, Device, Extent3d, FilterMode, Queue,
+    ShaderSource, ShaderStages, StorageTextureAccess, TexelCopyBufferLayout, Texture,
     TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
     TextureViewDescriptor, TextureViewDimension,
+    util::{BufferInitDescriptor, DeviceExt},
 };
 
 use crate::{
+    ColorSpace,
     future::AsyncBufferView,
-    image::{copied_pixel, Container, Image},
+    image::{Container, Image, copied_pixel},
     modules::include_shader,
     utils::{compute_work_group_count, padded_bytes_per_row},
-    ColorSpace,
 };
 
 const MAX_IMAGE_DIMENSION: u32 = 256;
@@ -50,7 +50,7 @@ impl InputTexture {
         queue.write_texture(
             texture.as_image_copy(),
             bytemuck::cast_slice(&image.rgba),
-            ImageDataLayout {
+            TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(4 * width),
                 rows_per_image: None,
@@ -116,7 +116,9 @@ impl InputTexture {
             label: Some("Resize pipeline"),
             layout: None,
             module: &resize_shader,
-            entry_point: "main",
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
         let filter_mode = FilterMode::Linear;
@@ -128,7 +130,7 @@ impl InputTexture {
             address_mode_w: AddressMode::ClampToEdge,
             mag_filter: filter_mode,
             min_filter: filter_mode,
-            mipmap_filter: filter_mode,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
 
@@ -167,6 +169,7 @@ impl InputTexture {
                 compute_work_group_count((texture_size.width, texture_size.height), (16, 16));
             let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
                 label: Some("Resize pass"),
+                timestamp_writes: None,
             });
             compute_pass.set_pipeline(&pipeline);
             compute_pass.set_bind_group(0, &compute_constants, &[]);
@@ -196,15 +199,15 @@ impl InputTexture {
         });
 
         encoder.copy_texture_to_buffer(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 aspect: wgpu::TextureAspect::All,
                 texture: self,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
             },
-            wgpu::ImageCopyBuffer {
+            wgpu::TexelCopyBufferInfo {
                 buffer: &buffer,
-                layout: wgpu::ImageDataLayout {
+                layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(padded_bytes_per_row as u32),
                     rows_per_image: None,
@@ -414,15 +417,15 @@ impl OutputTexture {
         });
 
         encoder.copy_texture_to_buffer(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 aspect: wgpu::TextureAspect::All,
                 texture: self,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
             },
-            wgpu::ImageCopyBuffer {
+            wgpu::TexelCopyBufferInfo {
                 buffer: &buffer,
-                layout: wgpu::ImageDataLayout {
+                layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(padded_bytes_per_row as u32),
                     rows_per_image: None,
@@ -596,7 +599,9 @@ impl CentroidsBuffer {
         let data = async_data.await?;
 
         let colors: Vec<_> = bytemuck::cast_slice::<u8, f32>(&data[16..])
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|color| {
                 let raw: Rgba<_, u8> = match color_space {
                     ColorSpace::Lab => {

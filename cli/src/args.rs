@@ -2,8 +2,8 @@ use std::fmt::Display;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use anyhow::anyhow;
 use anyhow::Result;
+use anyhow::anyhow;
 use clap::ValueEnum;
 use clap::{Parser, Subcommand};
 use kmeans_color_gpu::RGBA8;
