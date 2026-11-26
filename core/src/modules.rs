@@ -1,7 +1,7 @@
+use anyhow::Result;
 use log::{debug, log_enabled};
 use std::sync::mpsc::channel;
 use wgpu::{
-    util::{BufferInitDescriptor, DeviceExt},
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, Buffer, BufferAddress, BufferBinding,
     BufferBindingType, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, ComputePass,
@@ -9,12 +9,13 @@ use wgpu::{
     PipelineLayoutDescriptor, Queue, ShaderSource, ShaderStages, StorageTextureAccess, Texture,
     TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureViewDescriptor,
     TextureViewDimension,
+    util::{BufferInitDescriptor, DeviceExt},
 };
 
 use crate::{
+    CentroidsBuffer, ColorSpace, InputTexture,
     structures::{ColorIndexTexture, OutputTexture, WorkTexture},
     utils::compute_work_group_count,
-    CentroidsBuffer, ColorSpace, InputTexture,
 };
 
 macro_rules! include_shader {
@@ -74,15 +75,17 @@ impl ColorConverterModule {
         let convert_color_pipeline_layout =
             device.create_pipeline_layout(&PipelineLayoutDescriptor {
                 label: Some("Convert color layout"),
-                bind_group_layouts: &[&convert_color_bind_group_layout],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(&convert_color_bind_group_layout)],
+                immediate_size: 0,
             });
 
         let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("Convert color pipeline"),
             layout: Some(&convert_color_pipeline_layout),
             module: &convert_color_shader,
-            entry_point: "main",
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
@@ -184,15 +187,17 @@ impl ColorReverterModule {
         let revert_color_pipeline_layout =
             device.create_pipeline_layout(&PipelineLayoutDescriptor {
                 label: Some("Revert color layout"),
-                bind_group_layouts: &[&revert_color_bind_group_layout],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(&revert_color_bind_group_layout)],
+                immediate_size: 0,
             });
 
         let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("Revert color pipeline"),
             layout: Some(&revert_color_pipeline_layout),
             module: &revert_color_shader,
-            entry_point: "main",
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
@@ -310,14 +315,16 @@ impl SwapModule {
 
         let swap_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Swap pipeline layout"),
-            bind_group_layouts: &[&swap_bind_group_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&swap_bind_group_layout)],
+            immediate_size: 0,
         });
         let swap_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("Swap pipeline"),
             layout: Some(&swap_pipeline_layout),
             module: &swap_shader,
-            entry_point: "main",
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
         let dispatch_size = compute_work_group_count(image_dimensions, (16, 16));
@@ -397,15 +404,17 @@ impl FindCentroidModule {
         let find_centroid_pipeline_layout =
             device.create_pipeline_layout(&PipelineLayoutDescriptor {
                 label: Some("Pipeline layout"),
-                bind_group_layouts: &[&find_centroid_bind_group_layout],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(&find_centroid_bind_group_layout)],
+                immediate_size: 0,
             });
 
         let find_centroid_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("Find centroid pipeline"),
             layout: Some(&find_centroid_pipeline_layout),
             module: &find_centroid_shader,
-            entry_point: "main",
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
         let find_centroid_bind_group = device.create_bind_group(&BindGroupDescriptor {
@@ -520,25 +529,8 @@ impl<'a> ChooseCentroidModule<'a> {
                         },
                         count: None,
                     },
-                    BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
                 ],
             });
-
-        let part_id_buffer = device.create_buffer(&BufferDescriptor {
-            label: None,
-            size: 4,
-            usage: BufferUsages::STORAGE,
-            mapped_at_creation: false,
-        });
 
         let choose_centroid_bind_group_0 = device.create_bind_group(&BindGroupDescriptor {
             label: None,
@@ -560,10 +552,6 @@ impl<'a> ChooseCentroidModule<'a> {
                         &work_texture.create_view(&TextureViewDescriptor::default()),
                     ),
                 },
-                BindGroupEntry {
-                    binding: 3,
-                    resource: part_id_buffer.as_entire_binding(),
-                },
             ],
         });
 
@@ -581,17 +569,10 @@ impl<'a> ChooseCentroidModule<'a> {
             (image_dimensions.0 * image_dimensions.1, 1),
             (WORKGROUP_SIZE * N_SEQ, 1),
         );
-        let color_buffer_size = dispatch_size * 8 * 4;
-        let color_buffer = device.create_buffer(&BufferDescriptor {
+        // One `ColorAggregator` (vec3<f32> + u32, 16 bytes) per workgroup.
+        let aggregates_buffer = device.create_buffer(&BufferDescriptor {
             label: None,
-            size: color_buffer_size as BufferAddress,
-            usage: BufferUsages::STORAGE,
-            mapped_at_creation: false,
-        });
-        let flag_buffer_size = dispatch_size * 4;
-        let flag_buffer = device.create_buffer(&BufferDescriptor {
-            label: None,
-            size: flag_buffer_size as BufferAddress,
+            size: dispatch_size as BufferAddress * 16,
             usage: BufferUsages::STORAGE,
             mapped_at_creation: false,
         });
@@ -636,16 +617,6 @@ impl<'a> ChooseCentroidModule<'a> {
                         binding: 2,
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::Buffer {
-                            ty: BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
                             ty: BufferBindingType::Uniform,
                             has_dynamic_offset: false,
                             min_binding_size: None,
@@ -661,18 +632,14 @@ impl<'a> ChooseCentroidModule<'a> {
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: color_buffer.as_entire_binding(),
+                    resource: aggregates_buffer.as_entire_binding(),
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: flag_buffer.as_entire_binding(),
-                },
-                BindGroupEntry {
-                    binding: 2,
                     resource: convergence_buffer.as_entire_binding(),
                 },
                 BindGroupEntry {
-                    binding: 3,
+                    binding: 2,
                     resource: choose_centroid_settings_buffer.as_entire_binding(),
                 },
             ],
@@ -723,24 +690,28 @@ impl<'a> ChooseCentroidModule<'a> {
             device.create_pipeline_layout(&PipelineLayoutDescriptor {
                 label: Some("Choose centroid pipeline layout"),
                 bind_group_layouts: &[
-                    &choose_centroid_bind_group_0_layout,
-                    &choose_centroid_bind_group_1_layout,
-                    &k_index_bind_group_layout,
+                    Some(&choose_centroid_bind_group_0_layout),
+                    Some(&choose_centroid_bind_group_1_layout),
+                    Some(&k_index_bind_group_layout),
                 ],
-                push_constant_ranges: &[],
+                immediate_size: 0,
             });
         let choose_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("Choose centroid pipeline"),
             layout: Some(&choose_centroid_pipeline_layout),
             module: &choose_centroid_shader,
-            entry_point: "main",
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
         let pick_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("Choose centroid pipeline"),
             layout: Some(&choose_centroid_pipeline_layout),
             module: &choose_centroid_shader,
-            entry_point: "pick",
+            entry_point: Some("pick"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
         Self {
@@ -760,7 +731,7 @@ impl<'a> ChooseCentroidModule<'a> {
         }
     }
 
-    pub(crate) fn compute(&self, device: &Device, queue: &Queue) {
+    pub(crate) fn compute(&self, device: &Device, queue: &Queue) -> Result<()> {
         const MAX_OBS_CHAIN: usize = 64;
         const MAX_ITERATION: u32 = 128;
         const MAX_ITERATION_BEFORE_CONVERGENCE_CHECK: u32 = 8;
@@ -775,11 +746,12 @@ impl<'a> ChooseCentroidModule<'a> {
 
                 let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
                     label: Some("Choose centroid pass"),
+                    timestamp_writes: None,
                 });
                 compute_pass.set_bind_group(0, &self.bind_group_0, &[]);
                 compute_pass.set_bind_group(1, &self.bind_group_1, &[]);
                 for k in k_start..max_k {
-                    compute_pass.set_bind_group(2, &self.bind_groups[k as usize], &[]);
+                    compute_pass.set_bind_group(2, &self.bind_groups[k], &[]);
                     compute_pass.set_pipeline(&self.choose_pipeline);
                     compute_pass.dispatch_workgroups(self.dispatch_size, 1, 1);
                     compute_pass.set_pipeline(&self.pick_pipeline);
@@ -788,13 +760,15 @@ impl<'a> ChooseCentroidModule<'a> {
             }
 
             queue.submit(Some(encoder.finish()));
-            device.poll(wgpu::Maintain::Wait);
+            device.poll(wgpu::PollType::wait_indefinitely())?;
 
             let mut encoder =
                 device.create_command_encoder(&CommandEncoderDescriptor { label: None });
             {
-                let mut compute_pass =
-                    encoder.begin_compute_pass(&ComputePassDescriptor { label: None });
+                let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                    label: None,
+                    timestamp_writes: None,
+                });
 
                 self.find_centroid_module.dispatch(&mut compute_pass);
             }
@@ -816,14 +790,15 @@ impl<'a> ChooseCentroidModule<'a> {
                     sender.send(v).expect("Couldn't send result");
                 });
 
-                device.poll(wgpu::Maintain::Wait);
+                device.poll(wgpu::PollType::wait_indefinitely())?;
 
                 match receiver.recv() {
                     Ok(Ok(_)) => {
                         let convergence_data = bytemuck::cast_slice::<u8, u32>(
-                            &check_convergence_slice.get_mapped_range(),
+                            &check_convergence_slice.get_mapped_range()?,
                         )
                         .to_vec();
+                        self.convergence_buffer.mapped_buffer.unmap();
                         if convergence_data[self.k as usize] >= self.k {
                             // We converged, time to go.
                             debug!("We have convergence, checked at iteration {iteration}");
@@ -832,8 +807,6 @@ impl<'a> ChooseCentroidModule<'a> {
                     }
                     _ => break 'iteration,
                 }
-
-                self.convergence_buffer.mapped_buffer.unmap();
             } else {
                 queue.submit(Some(encoder.finish()));
             }
@@ -853,13 +826,15 @@ impl<'a> ChooseCentroidModule<'a> {
                 sender.send(v).expect("Couldn't send result");
             });
 
-            device.poll(wgpu::Maintain::Wait);
+            device.poll(wgpu::PollType::wait_indefinitely())?;
 
             if let Ok(Ok(())) = receiver.recv() {
-                let data = cent_buffer_slice.get_mapped_range();
+                let data = cent_buffer_slice.get_mapped_range()?;
 
                 for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[16..])
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .enumerate()
                 {
                     debug!("Centroid {index} = {k:?}")
@@ -868,6 +843,8 @@ impl<'a> ChooseCentroidModule<'a> {
             staging_buffer.unmap();
             debug!("========================");
         }
+
+        Ok(())
     }
 }
 
@@ -943,7 +920,7 @@ impl<'a> PlusPlusInitModule<'a> {
         }
     }
 
-    pub(crate) fn compute(&self, device: &Device, queue: &Queue) {
+    pub(crate) fn compute(&self, device: &Device, queue: &Queue) -> Result<()> {
         const WORKGROUP_SIZE: u32 = 256;
         const N_SEQ: u32 = 16;
         const MAX_OPERATIONS_CHAIN: usize = 32;
@@ -988,27 +965,7 @@ impl<'a> PlusPlusInitModule<'a> {
                         },
                         count: None,
                     },
-                    BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    BindGroupLayoutEntry {
-                        binding: 4,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    DistanceMapTexture::texture_2d_layout(5),
+                    DistanceMapTexture::texture_2d_layout(3),
                 ],
             });
 
@@ -1016,21 +973,10 @@ impl<'a> PlusPlusInitModule<'a> {
             (self.image_dimensions.0 * self.image_dimensions.1, 1),
             (WORKGROUP_SIZE * N_SEQ, 1),
         );
-        let prefix_buffer_size = dispatch_size * 4 * 2;
-        let prefix_buffer = device.create_buffer(&BufferDescriptor {
+        // One `Candidate` (u32 + f32, 8 bytes) per workgroup.
+        let candidates_buffer = device.create_buffer(&BufferDescriptor {
             label: None,
-            size: prefix_buffer_size as BufferAddress,
-            usage: BufferUsages::STORAGE,
-            mapped_at_creation: false,
-        });
-        let flag_buffer = device.create_buffer_init(&BufferInitDescriptor {
-            label: None,
-            contents: bytemuck::cast_slice::<u32, u8>(&vec![0; dispatch_size as usize]),
-            usage: BufferUsages::STORAGE,
-        });
-        let part_id_buffer = device.create_buffer(&BufferDescriptor {
-            label: None,
-            size: 4,
+            size: dispatch_size as BufferAddress * 8,
             usage: BufferUsages::STORAGE,
             mapped_at_creation: false,
         });
@@ -1053,18 +999,10 @@ impl<'a> PlusPlusInitModule<'a> {
                 },
                 BindGroupEntry {
                     binding: 2,
-                    resource: prefix_buffer.as_entire_binding(),
+                    resource: candidates_buffer.as_entire_binding(),
                 },
                 BindGroupEntry {
                     binding: 3,
-                    resource: flag_buffer.as_entire_binding(),
-                },
-                BindGroupEntry {
-                    binding: 4,
-                    resource: part_id_buffer.as_entire_binding(),
-                },
-                BindGroupEntry {
-                    binding: 5,
                     resource: BindingResource::TextureView(
                         &distance_map_texture
                             .0
@@ -1119,28 +1057,34 @@ impl<'a> PlusPlusInitModule<'a> {
             device.create_pipeline_layout(&PipelineLayoutDescriptor {
                 label: Some("Choose centroid pipeline layout"),
                 bind_group_layouts: &[
-                    &choose_centroid_bind_group_layout,
-                    &k_index_bind_group_layout,
+                    Some(&choose_centroid_bind_group_layout),
+                    Some(&k_index_bind_group_layout),
                 ],
-                push_constant_ranges: &[],
+                immediate_size: 0,
             });
         let initial_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("Choose centroid pipeline"),
             layout: Some(&choose_centroid_pipeline_layout),
             module: &choose_centroid_shader,
-            entry_point: "initial",
+            entry_point: Some("initial"),
+            compilation_options: Default::default(),
+            cache: None,
         });
         let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("Choose centroid pipeline"),
             layout: Some(&choose_centroid_pipeline_layout),
             module: &choose_centroid_shader,
-            entry_point: "main",
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
         });
         let pick_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("Choose centroid pipeline"),
             layout: Some(&choose_centroid_pipeline_layout),
             module: &choose_centroid_shader,
-            entry_point: "pick",
+            entry_point: Some("pick"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
         let centroid_size = (self.k as u64 + 1) * 16;
@@ -1163,8 +1107,11 @@ impl<'a> PlusPlusInitModule<'a> {
 
         let calc_diff_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &[&calc_diff_bind_group_layout, &k_index_bind_group_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[
+                Some(&calc_diff_bind_group_layout),
+                Some(&k_index_bind_group_layout),
+            ],
+            immediate_size: 0,
         });
 
         let calc_diff_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -1203,7 +1150,9 @@ impl<'a> PlusPlusInitModule<'a> {
             label: None,
             layout: Some(&calc_diff_pipeline_layout),
             module: &calc_diff_shader_module,
-            entry_point: "main",
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
         let calc_diff_dispatch_size = compute_work_group_count(self.image_dimensions, (16, 16));
@@ -1216,9 +1165,10 @@ impl<'a> PlusPlusInitModule<'a> {
             {
                 let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
                     label: Some("Plus plus init pass"),
+                    timestamp_writes: None,
                 });
                 for k in k_start..max_k {
-                    compute_pass.set_bind_group(1, &bind_groups[k as usize], &[]);
+                    compute_pass.set_bind_group(1, &bind_groups[k], &[]);
                     if k == 0 {
                         compute_pass.set_pipeline(&initial_pipeline);
                         compute_pass.set_bind_group(0, &bind_group, &[]);
@@ -1242,7 +1192,7 @@ impl<'a> PlusPlusInitModule<'a> {
             }
 
             queue.submit(Some(encoder.finish()));
-            device.poll(wgpu::Maintain::Wait);
+            device.poll(wgpu::PollType::wait_indefinitely())?;
         }
 
         if log_enabled!(log::Level::Debug) {
@@ -1265,13 +1215,15 @@ impl<'a> PlusPlusInitModule<'a> {
                 sender.send(v).expect("Couldn't send result");
             });
 
-            device.poll(wgpu::Maintain::Wait);
+            device.poll(wgpu::PollType::wait_indefinitely())?;
 
             if let Ok(Ok(())) = receiver.recv() {
-                let data = cent_buffer_slice.get_mapped_range();
+                let data = cent_buffer_slice.get_mapped_range()?;
 
                 for (index, k) in bytemuck::cast_slice::<u8, f32>(&data[16..])
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .enumerate()
                 {
                     debug!("Centroid {index} = {k:?}")
@@ -1281,6 +1233,8 @@ impl<'a> PlusPlusInitModule<'a> {
 
             staging_buffer.unmap();
         }
+
+        Ok(())
     }
 }
 
@@ -1352,18 +1306,20 @@ impl MixColorsModule {
 
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Mix colors pipeline layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bind_group_layout)],
+            immediate_size: 0,
         });
 
         let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("Mix colors pipeline"),
             layout: Some(&pipeline_layout),
             module: &shader_module,
-            entry_point: match mix_mode {
+            entry_point: Some(match mix_mode {
                 MixMode::Dither => "main_dither",
                 MixMode::Meld => "main_meld",
-            },
+            }),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
         let dispatch_size = compute_work_group_count(image_dimensions, (16, 16));

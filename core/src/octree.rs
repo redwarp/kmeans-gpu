@@ -299,7 +299,7 @@ mod tests {
             [232, 193, 112, 255],
             [235, 237, 233, 255],
         ]
-        .map(|rgba| RGBA::from(rgba));
+        .map(RGBA::from);
         println!("Sorting {} colors", pixels.len());
         for pixel in &pixels {
             tree.add_color(pixel);

@@ -1,6 +1,6 @@
 use std::{
     future::Future,
-    sync::mpsc::{channel, Receiver},
+    sync::mpsc::{Receiver, channel},
     task::Poll,
 };
 
@@ -29,17 +29,19 @@ impl<'a> AsyncBufferView<'a> {
 }
 
 impl<'a> Future for AsyncBufferView<'a> {
-    type Output = Result<BufferView<'a>, BufferAsyncError>;
+    type Output = anyhow::Result<BufferView>;
 
     fn poll(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
-        self.device.poll(wgpu::MaintainBase::Poll);
+        if let Err(e) = self.device.poll(wgpu::PollType::Poll) {
+            return Poll::Ready(Err(e.into()));
+        }
         match self.receiver.try_recv() {
             Ok(received) => match received {
-                Ok(_) => Poll::Ready(Ok(self.buffer_slice.get_mapped_range())),
-                Err(e) => Poll::Ready(Err(e)),
+                Ok(_) => Poll::Ready(self.buffer_slice.get_mapped_range().map_err(Into::into)),
+                Err(e) => Poll::Ready(Err(e.into())),
             },
             Err(_) => {
                 cx.waker().wake_by_ref();

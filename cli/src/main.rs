@@ -1,8 +1,8 @@
 use anyhow::{Ok, Result};
 use args::{Cli, Commands, Extension, Palette};
 use clap::Parser;
-use image::{ImageBuffer, Rgba, RgbaImage};
-use kmeans_color_gpu::{image::Image, Algorithm, ImageProcessor, ReduceMode, RGBA8};
+use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba, RgbaImage};
+use kmeans_color_gpu::{Algorithm, ImageProcessor, RGBA8, ReduceMode, image::Image};
 use pollster::FutureExt;
 use std::{
     borrow::Cow,
@@ -91,7 +91,7 @@ async fn find_subcommand(
         ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, result.into_raw_pixels())
     {
         let output_file = find_file_path(&reduce_mode, &output, &input, &None)?;
-        output_image.save(output_file)?;
+        save_image(output_image, output_file)?;
     }
 
     Ok(())
@@ -118,7 +118,7 @@ async fn reduce_subcommand(
         ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, result.into_raw_pixels())
     {
         let output_file = reduce_file_path(color_count, &algo, &reduce_mode, &output, &input)?;
-        output_image.save(output_file)?;
+        save_image(output_image, output_file)?;
     }
 
     Ok(())
@@ -216,6 +216,16 @@ fn find_file_path(
 
         Ok(output_path)
     }
+}
+
+/// Saves the image, dropping the alpha channel for formats that don't support it.
+fn save_image(image: RgbaImage, path: PathBuf) -> Result<()> {
+    match ImageFormat::from_path(&path)? {
+        ImageFormat::Jpeg => DynamicImage::ImageRgba8(image).into_rgb8().save(path)?,
+        _ => image.save(path)?,
+    }
+
+    Ok(())
 }
 
 fn save_palette<P>(path: P, palette: &[RGBA8], size: u32) -> Result<()>

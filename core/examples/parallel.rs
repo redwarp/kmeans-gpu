@@ -1,7 +1,7 @@
 use std::{fs::File, path::Path, sync::Arc, thread, time::Instant};
 
 use gif::{Frame, Repeat};
-use kmeans_color_gpu::{image::copied_pixel, Algorithm, ImageProcessor};
+use kmeans_color_gpu::{Algorithm, ImageProcessor, image::copied_pixel};
 use pollster::FutureExt;
 
 fn main() {

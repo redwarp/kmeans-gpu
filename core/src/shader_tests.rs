@@ -3,10 +3,10 @@ use std::{borrow::Cow, sync::mpsc::channel};
 use palette::{IntoColor, Lab, Srgb};
 use pollster::FutureExt;
 use wgpu::{
+    BindGroupDescriptor, BindGroupEntry, BufferDescriptor, BufferUsages, CommandEncoderDescriptor,
+    ComputePipelineDescriptor, Device, DeviceDescriptor, Instance, MapMode, PollType, Queue,
+    ShaderSource,
     util::{self, DeviceExt},
-    Backends, BindGroupDescriptor, BindGroupEntry, BufferDescriptor, BufferUsages,
-    CommandEncoderDescriptor, ComputePipelineDescriptor, Device, DeviceDescriptor, Instance,
-    MaintainBase, MapMode, Queue, ShaderSource,
 };
 
 use crate::modules::include_shader;
@@ -77,7 +77,9 @@ fn vec3x2_as_input_f32_as_output(
                 label: None,
                 layout: None,
                 module: &shader_module,
-                entry_point,
+                entry_point: Some(entry_point),
+                compilation_options: Default::default(),
+                cache: None,
             });
 
         let bind_group_layout = compute_pipeline.get_bind_group_layout(0);
@@ -100,8 +102,10 @@ fn vec3x2_as_input_f32_as_output(
             .device
             .create_command_encoder(&CommandEncoderDescriptor { label: None });
         {
-            let mut cpass =
-                encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: None,
+            });
             cpass.set_pipeline(&compute_pipeline);
             cpass.set_bind_group(0, &bind_group, &[]);
             cpass.insert_debug_marker("Compute cie94");
@@ -115,10 +119,15 @@ fn vec3x2_as_input_f32_as_output(
         let (sender, receiver) = channel();
         buffer_slice.map_async(MapMode::Read, move |v| sender.send(v).unwrap());
 
-        context.device.poll(MaintainBase::Wait);
+        context
+            .device
+            .poll(PollType::wait_indefinitely())
+            .expect("Couldn't poll the device");
 
-        if let Ok(_) = receiver.recv() {
-            let data = buffer_slice.get_mapped_range();
+        if receiver.recv().is_ok() {
+            let data = buffer_slice
+                .get_mapped_range()
+                .expect("Couldn't get mapped range");
             let result: f32 = bytemuck::cast_slice(&data)[0];
 
             drop(data);
@@ -132,28 +141,16 @@ fn vec3x2_as_input_f32_as_output(
 }
 
 fn run_wgpu_test<T>(test_function: impl FnOnce(&TestingContext) -> T) -> T {
-    let backend_bits = util::backend_bits_from_env().unwrap_or_else(Backends::all);
-    let instance = Instance::new(wgpu::InstanceDescriptor {
-        backends: backend_bits,
-        dx12_shader_compiler: wgpu::Dx12Compiler::default(),
-    });
+    let instance = Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
     let adapter = pollster::block_on(util::initialize_adapter_from_env_or_default(
         &instance, None,
     ))
     .expect("could not find suitable adapter on the system");
 
-    let features = adapter.features();
-    let limits = adapter.limits();
-
+    // The shaders under test need no optional feature, and requesting every feature
+    // of the adapter would include experimental ones, that wgpu refuses by default.
     let (device, queue) = adapter
-        .request_device(
-            &DeviceDescriptor {
-                label: None,
-                features,
-                limits,
-            },
-            None,
-        )
+        .request_device(&DeviceDescriptor::default())
         .block_on()
         .expect("Couldn't create device");
 
@@ -161,7 +158,10 @@ fn run_wgpu_test<T>(test_function: impl FnOnce(&TestingContext) -> T) -> T {
 
     let result = test_function(&context);
 
-    context.device.poll(MaintainBase::Wait);
+    context
+        .device
+        .poll(PollType::wait_indefinitely())
+        .expect("Couldn't poll the device");
 
     result
 }
@@ -232,7 +232,7 @@ fn test_pow() {
     let pow = 7.0;
 
     let result = run_pow(number, pow);
-    let expected = 180.1088541;
+    let expected = 180.108_86;
 
     assert!(
         (result - expected).abs() < 0.1,

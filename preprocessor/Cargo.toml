@@ -8,11 +8,10 @@ repository.workspace = true
 description = "A shader preprocessor, to replace #includes in shaders by appropriate files used for the kmeans-color-gpu crate."
 
 [dependencies]
-regex = "1.9"
+regex = "1.13"
 pathdiff = "0.2"
 anyhow = "1.0"
-naga = { version = "0.13", optional = true, features = ["validate", "wgsl-in"] }
-codespan-reporting = { version = "0.11", optional = true }
+naga = { version = "30.0", optional = true, features = ["wgsl-in", "stderr"] }
 
 [features]
-validate = ["naga", "codespan-reporting"]
+validate = ["naga"]
