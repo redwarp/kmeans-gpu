@@ -196,21 +196,16 @@ fn validate_palette(s: &str) -> Result<Palette> {
 
 fn parse_palette(path: &PathBuf) -> Result<Palette> {
     let image = image::open(path)?.to_rgba8();
-    let (width, height) = image.dimensions();
-    let pixel_count = width as usize * height as usize;
-
-    if pixel_count > 512 {
-        return Err(anyhow!(
-            "Trying to load a palette with more than 512 colors"
-        ));
-    }
 
     let mut colors: Vec<RGBA8> = bytemuck::cast_slice(image.as_raw()).to_vec();
     colors.sort();
     colors.dedup();
 
-    if colors.len() < pixel_count {
-        return Err(anyhow!("Trying to load a palette with recuring colors"));
+    if colors.len() > 512 {
+        return Err(anyhow!(
+            "Trying to load a palette with more than 512 colors ({} found)",
+            colors.len()
+        ));
     }
     Ok(Palette { colors })
 }
@@ -290,5 +285,20 @@ mod tests {
         let parsed = parsed.unwrap();
 
         assert_eq!(64, parsed.colors.len());
+    }
+
+    #[test]
+    fn test_parse_upscaled_palette() {
+        let mut image = image::RgbaImage::new(64, 8);
+        for (x, _, pixel) in image.enumerate_pixels_mut() {
+            *pixel = image::Rgba([(x / 8) as u8 * 30, 0, 0, 255]);
+        }
+        let path = std::env::temp_dir().join("kmeans_gpu_upscaled_palette_test.png");
+        image.save(&path).unwrap();
+
+        let parsed = parse_palette(&path);
+        std::fs::remove_file(&path).ok();
+
+        assert_eq!(8, parsed.unwrap().colors.len());
     }
 }
